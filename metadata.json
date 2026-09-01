@@ -1,0 +1,7 @@
+{
+  "name": "OmniAI",
+  "description": "Production-ready Android AI Assistant with Samsung Pop-up style floating window, screen scan with vision, and multi-model AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
