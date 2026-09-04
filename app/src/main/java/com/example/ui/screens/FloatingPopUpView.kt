@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CropFree
@@ -75,6 +76,8 @@ fun FloatingPopUpView(
     onSendMessage: (String, Bitmap?) -> Unit,
     onScanScreen: () -> Unit,
     onAreaScan: () -> Unit,
+    onOcrGrabber: () -> Unit = {},
+    onQuickHud: () -> Unit = {},
     onVoiceInput: () -> Unit,
     onMinimize: () -> Unit,
     onMaximize: () -> Unit,
@@ -85,9 +88,9 @@ fun FloatingPopUpView(
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
-    LaunchedEffect(messages.size, isGenerating) {
+    LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
+            listState.scrollToItem(messages.size - 1)
         }
     }
 
@@ -343,53 +346,99 @@ fun FloatingPopUpView(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 6.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Scan Entire Screen button
+                            // Scan Screen
                             Button(
                                 onClick = onScanScreen,
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                                 ),
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(34.dp)
+                                    .height(32.dp)
                                     .testTag("popup_scan_screen_button")
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Screenshot,
                                     contentDescription = "Scan Screen",
-                                    modifier = Modifier.size(15.dp)
+                                    modifier = Modifier.size(13.dp)
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Scan Screen", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("Scan", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            // OCR Text Grabber
+                            Button(
+                                onClick = onOcrGrabber,
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                                ),
+                                modifier = Modifier
+                                    .weight(1.1f)
+                                    .height(32.dp)
+                                    .testTag("popup_ocr_grabber_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.TextFields,
+                                    contentDescription = "Text Grabber",
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("OCR Text", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            // Quick HUD Solution
+                            Button(
+                                onClick = onQuickHud,
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(32.dp)
+                                    .testTag("popup_quick_hud_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = "HUD",
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("HUD", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
 
                             // Scan Selected Area
                             Button(
                                 onClick = onAreaScan,
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer
                                 ),
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(34.dp)
+                                    .height(32.dp)
                                     .testTag("popup_area_scan_button")
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.CropFree,
                                     contentDescription = "Area Scan",
-                                    modifier = Modifier.size(15.dp)
+                                    modifier = Modifier.size(13.dp)
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Crop Area", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("Crop", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 

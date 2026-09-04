@@ -11,10 +11,13 @@ import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Handler
-import android.os.Looper
+import android.os.HandlerThread
 import android.util.DisplayMetrics
 import android.view.WindowManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 
 class ScreenCaptureHelper(private val context: Context) {
@@ -31,11 +34,32 @@ class ScreenCaptureHelper(private val context: Context) {
             var mediaProjection: MediaProjection? = null
             var virtualDisplay: VirtualDisplay? = null
             var imageReader: ImageReader? = null
+            var backgroundThread: HandlerThread? = null
+
+            val isResumed = AtomicBoolean(false)
+
+            fun cleanup() {
+                try {
+                    imageReader?.setOnImageAvailableListener(null, null)
+                    imageReader?.close()
+                } catch (e: Exception) {}
+                try {
+                    virtualDisplay?.release()
+                } catch (e: Exception) {}
+                try {
+                    mediaProjection?.stop()
+                } catch (e: Exception) {}
+                try {
+                    backgroundThread?.quitSafely()
+                } catch (e: Exception) {}
+            }
 
             try {
                 mediaProjection = projectionManager.getMediaProjection(resultCode, data)
                 if (mediaProjection == null) {
-                    continuation.resume(null)
+                    if (isResumed.compareAndSet(false, true)) {
+                        continuation.resume(null)
+                    }
                     return@suspendCancellableCoroutine
                 }
 
@@ -47,9 +71,11 @@ class ScreenCaptureHelper(private val context: Context) {
                 val height = metrics.heightPixels
                 val density = metrics.densityDpi
 
-                imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+                // Use background thread for fast image capture processing so UI thread does not lag or hang
+                backgroundThread = HandlerThread("ScreenCaptureBackgroundThread").apply { start() }
+                val backgroundHandler = Handler(backgroundThread.looper)
 
-                val handler = Handler(Looper.getMainLooper())
+                imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
 
                 imageReader.setOnImageAvailableListener({ reader ->
                     try {
@@ -71,6 +97,9 @@ class ScreenCaptureHelper(private val context: Context) {
 
                             // Crop bitmap to screen bounds without padding
                             val cleanBitmap = Bitmap.createBitmap(bitmap, 0, 0, width, height)
+                            if (bitmap != cleanBitmap) {
+                                bitmap.recycle()
+                            }
 
                             // If user selected a specific area rectangle, crop to that area
                             val finalBitmap = if (cropRect != null && cropRect.width() > 10 && cropRect.height() > 10) {
@@ -78,29 +107,28 @@ class ScreenCaptureHelper(private val context: Context) {
                                 val top = cropRect.top.coerceIn(0, height - 1)
                                 val cropW = cropRect.width().coerceIn(1, width - left)
                                 val cropH = cropRect.height().coerceIn(1, height - top)
-                                Bitmap.createBitmap(cleanBitmap, left, top, cropW, cropH)
+                                val cropped = Bitmap.createBitmap(cleanBitmap, left, top, cropW, cropH)
+                                if (cleanBitmap != cropped) {
+                                    cleanBitmap.recycle()
+                                }
+                                cropped
                             } else {
                                 cleanBitmap
                             }
 
-                            // Clean up
-                            imageReader?.setOnImageAvailableListener(null, null)
-                            virtualDisplay?.release()
-                            mediaProjection.stop()
+                            cleanup()
 
-                            if (continuation.isActive) {
+                            if (isResumed.compareAndSet(false, true) && continuation.isActive) {
                                 continuation.resume(finalBitmap)
                             }
                         }
                     } catch (e: Exception) {
-                        imageReader?.setOnImageAvailableListener(null, null)
-                        virtualDisplay?.release()
-                        mediaProjection?.stop()
-                        if (continuation.isActive) {
+                        cleanup()
+                        if (isResumed.compareAndSet(false, true) && continuation.isActive) {
                             continuation.resume(null)
                         }
                     }
-                }, handler)
+                }, backgroundHandler)
 
                 virtualDisplay = mediaProjection.createVirtualDisplay(
                     "OmniAIScreenCapture",
@@ -110,24 +138,20 @@ class ScreenCaptureHelper(private val context: Context) {
                     DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                     imageReader.surface,
                     null,
-                    handler
+                    backgroundHandler
                 )
 
                 // Timeout fallback after 3 seconds if image listener doesn't fire
-                handler.postDelayed({
-                    if (continuation.isActive) {
-                        imageReader.setOnImageAvailableListener(null, null)
-                        virtualDisplay?.release()
-                        mediaProjection.stop()
+                backgroundHandler.postDelayed({
+                    cleanup()
+                    if (isResumed.compareAndSet(false, true) && continuation.isActive) {
                         continuation.resume(null)
                     }
                 }, 3000)
 
             } catch (e: Exception) {
-                virtualDisplay?.release()
-                mediaProjection?.stop()
-                imageReader?.close()
-                if (continuation.isActive) {
+                cleanup()
+                if (isResumed.compareAndSet(false, true) && continuation.isActive) {
                     continuation.resume(null)
                 }
             }

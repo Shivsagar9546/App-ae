@@ -12,18 +12,25 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
+import android.speech.tts.TextToSpeech
 import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
@@ -36,8 +43,12 @@ import com.example.data.ai.AiRepository
 import com.example.data.ai.AiResult
 import com.example.data.local.ChatMessage
 import com.example.data.local.Conversation
+import com.example.data.preferences.AdminSettings
+import com.example.data.preferences.AdminPreferencesRepository
 import com.example.ui.screens.FloatingBubbleView
+import com.example.ui.screens.FloatingOcrTextGrabberView
 import com.example.ui.screens.FloatingPopUpView
+import com.example.ui.screens.FloatingQuickSolutionHudView
 import com.example.ui.screens.SelectedAreaCropOverlay
 import com.example.ui.theme.OmniAITheme
 import kotlinx.coroutines.CoroutineScope
@@ -48,15 +59,18 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 import java.util.UUID
 
-class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOwner {
+class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner, TextToSpeech.OnInitListener {
 
     private val lifecycleRegistry = LifecycleRegistry(this)
     private val savedStateRegistryController = SavedStateRegistryController.create(this)
+    private val appViewModelStore = ViewModelStore()
 
     override val lifecycle: Lifecycle get() = lifecycleRegistry
     override val savedStateRegistry: SavedStateRegistry get() = savedStateRegistryController.savedStateRegistry
+    override val viewModelStore: ViewModelStore get() = appViewModelStore
 
     private lateinit var windowManager: WindowManager
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
@@ -64,6 +78,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     private lateinit var aiRepository: AiRepository
     private lateinit var screenCaptureHelper: ScreenCaptureHelper
     private lateinit var voiceHelper: VoiceRecognitionHelper
+    private var textToSpeech: TextToSpeech? = null
 
     // Overlay Views
     private var bubbleView: ComposeView? = null
@@ -74,6 +89,12 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
 
     private var cropOverlayView: ComposeView? = null
     private var cropOverlayParams: WindowManager.LayoutParams? = null
+
+    private var ocrView: ComposeView? = null
+    private var ocrParams: WindowManager.LayoutParams? = null
+
+    private var hudView: ComposeView? = null
+    private var hudParams: WindowManager.LayoutParams? = null
 
     // State flows for popup UI
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
@@ -88,12 +109,31 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     private val _statusText = MutableStateFlow<String?>(null)
     val statusText: StateFlow<String?> = _statusText.asStateFlow()
 
+    // State flows for OCR Text Grabber (Feature 1)
+    private val _ocrExtractedText = MutableStateFlow<String?>(null)
+    val ocrExtractedText: StateFlow<String?> = _ocrExtractedText.asStateFlow()
+
+    private val _isOcrLoading = MutableStateFlow(false)
+    val isOcrLoading: StateFlow<Boolean> = _isOcrLoading.asStateFlow()
+
+    // State flows for Quick Solution HUD (Feature 2)
+    private val _hudSolutionText = MutableStateFlow<String?>(null)
+    val hudSolutionText: StateFlow<String?> = _hudSolutionText.asStateFlow()
+
+    private val _isHudLoading = MutableStateFlow(false)
+    val isHudLoading: StateFlow<Boolean> = _isHudLoading.asStateFlow()
+
+    private val _hudTitle = MutableStateFlow("Quick AI Solution")
+    val hudTitle: StateFlow<String> = _hudTitle.asStateFlow()
+
     private var screenWidth = 1080
     private var screenHeight = 2400
 
     override fun onCreate() {
         super.onCreate()
-        savedStateRegistryController.performRestore(null)
+        try {
+            savedStateRegistryController.performRestore(null)
+        } catch (e: Exception) {}
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
@@ -104,6 +144,10 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         screenCaptureHelper = ScreenCaptureHelper(this)
         voiceHelper = VoiceRecognitionHelper(this)
 
+        try {
+            textToSpeech = TextToSpeech(this, this)
+        } catch (e: Exception) {}
+
         updateScreenDimensions()
         activeServiceInstance = this
 
@@ -111,12 +155,33 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         showBubble()
     }
 
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            try {
+                textToSpeech?.language = Locale.getDefault()
+            } catch (e: Exception) {}
+        }
+    }
+
+    private fun speakText(text: String) {
+        try {
+            textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "HudUtterance")
+        } catch (e: Exception) {
+            Toast.makeText(this, "Speech not ready", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun updateScreenDimensions() {
-        val metrics = DisplayMetrics()
-        @Suppress("DEPRECATION")
-        windowManager.defaultDisplay.getRealMetrics(metrics)
-        screenWidth = metrics.widthPixels
-        screenHeight = metrics.heightPixels
+        try {
+            val metrics = DisplayMetrics()
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.getRealMetrics(metrics)
+            screenWidth = if (metrics.widthPixels > 0) metrics.widthPixels else 1080
+            screenHeight = if (metrics.heightPixels > 0) metrics.heightPixels else 2400
+        } catch (e: Exception) {
+            screenWidth = 1080
+            screenHeight = 2400
+        }
     }
 
     private fun startForegroundServiceNotification() {
@@ -141,15 +206,29 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         )
 
         val notification: Notification = NotificationCompat.Builder(this, OmniAIApplication.CHANNEL_FLOATING_SERVICE)
-            .setContentTitle("OmniAI Floating Assistant")
-            .setContentText("Tap to open full app or use the floating bubble over other apps")
+            .setContentTitle("OmniAI Assistant Active")
+            .setContentText("Tap to open full app or use floating tools over other apps")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Close Assistant", stopPendingIntent)
             .setOngoing(true)
             .build()
 
-        startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            try {
+                startForeground(NOTIFICATION_ID, notification)
+            } catch (e2: Exception) {}
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -169,6 +248,8 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         if (!Settings.canDrawOverlays(this)) return
         hidePopup()
         hideCropOverlay()
+        hideOcrGrabber()
+        hideQuickHud()
 
         if (bubbleView != null) {
             bubbleView?.visibility = View.VISIBLE
@@ -186,20 +267,32 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             layoutFlag,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = screenWidth - 220
+            x = (screenWidth - 220).coerceAtLeast(20)
             y = screenHeight / 3
         }
 
         bubbleView = ComposeView(this).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setViewTreeLifecycleOwner(this@FloatingAssistantService)
             setViewTreeSavedStateRegistryOwner(this@FloatingAssistantService)
+            setViewTreeViewModelStoreOwner(this@FloatingAssistantService)
             setContent {
+                val omniApp = application as OmniAIApplication
+                val adminSettings by omniApp.adminPreferences.settingsFlow.collectAsState(initial = AdminSettings())
+
                 OmniAITheme {
                     FloatingBubbleView(
+                        bubbleStyle = adminSettings.bubbleStyle,
+                        customImagePath = adminSettings.bubbleCustomImagePath,
+                        presetIcon = adminSettings.bubblePresetIcon,
+                        customText = adminSettings.bubbleText,
+                        gradientPreset = adminSettings.bubbleGradient,
+                        bubbleSize = adminSettings.bubbleSize,
+                        bubbleAlpha = adminSettings.bubbleAlpha,
                         onBubbleClick = {
                             showPopup()
                         },
@@ -209,13 +302,19 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         onAreaScan = {
                             showCropOverlay()
                         },
+                        onOcrGrabber = {
+                            startOcrTextExtraction(cropRect = null)
+                        },
+                        onQuickHud = {
+                            startQuickHudSolve(cropRect = null)
+                        },
                         onVoiceClick = {
                             startVoiceQuery()
                         },
                         onOpenSettings = {
                             val intent = Intent(this@FloatingAssistantService, MainActivity::class.java).apply {
                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                putExtra("NAV_TARGET", "settings")
+                                putExtra("NAV_TARGET", "assistant_hub")
                             }
                             startActivity(intent)
                         },
@@ -259,7 +358,6 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         if (!isDragging) {
                             showPopup()
                         } else {
-                            // Snap to closest edge (left or right)
                             bubbleParams?.let { params ->
                                 val midX = screenWidth / 2
                                 params.x = if (params.x < midX) 20 else (screenWidth - 200)
@@ -292,17 +390,26 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
 
     @SuppressLint("ClickableViewAccessibility")
     fun showPopup() {
-        if (!Settings.canDrawOverlays(this)) return
+        if (!Settings.canDrawOverlays(this)) {
+            Toast.makeText(this, "Please enable overlay permission in settings", Toast.LENGTH_SHORT).show()
+            return
+        }
         hideBubble()
+        hideOcrGrabber()
+        hideQuickHud()
 
         if (popupView != null) {
-            popupView?.visibility = View.VISIBLE
-            return
+            try {
+                popupView?.visibility = View.VISIBLE
+                return
+            } catch (e: Exception) {
+                hidePopup()
+            }
         }
 
         updateScreenDimensions()
-        val defaultWidth = (screenWidth * 0.90f).toInt().coerceAtMost(1000)
-        val defaultHeight = (screenHeight * 0.65f).toInt().coerceAtMost(1600)
+        val defaultWidth = (screenWidth * 0.92f).toInt().coerceIn(340, 1020)
+        val defaultHeight = (screenHeight * 0.65f).toInt().coerceIn(460, 1600)
 
         val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -315,23 +422,30 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             defaultWidth,
             defaultHeight,
             layoutFlag,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.CENTER
             x = 0
             y = 0
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
 
         popupView = ComposeView(this).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setViewTreeLifecycleOwner(this@FloatingAssistantService)
             setViewTreeSavedStateRegistryOwner(this@FloatingAssistantService)
+            setViewTreeViewModelStoreOwner(this@FloatingAssistantService)
             setContent {
+                val msgs by _messages.collectAsState()
+                val isGen by _isGenerating.collectAsState()
+                val status by _statusText.collectAsState()
+
                 OmniAITheme {
                     FloatingPopUpView(
-                        messages = _messages.value,
-                        isGenerating = _isGenerating.value,
-                        statusText = _statusText.value,
+                        messages = msgs,
+                        isGenerating = isGen,
+                        statusText = status,
                         onSendMessage = { text, img ->
                             sendMessage(text, img, isScan = false)
                         },
@@ -340,6 +454,12 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         },
                         onAreaScan = {
                             showCropOverlay()
+                        },
+                        onOcrGrabber = {
+                            startOcrTextExtraction(cropRect = null)
+                        },
+                        onQuickHud = {
+                            startQuickHudSolve(cropRect = null)
                         },
                         onVoiceInput = {
                             startVoiceQuery()
@@ -365,8 +485,8 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         },
                         onResize = { dw, dh ->
                             popupParams?.let { params ->
-                                val newW = (params.width + dw.toInt()).coerceIn(400, screenWidth - 40)
-                                val newH = (params.height + dh.toInt()).coerceIn(500, screenHeight - 100)
+                                val newW = (params.width + dw.toInt()).coerceIn(320, screenWidth - 20)
+                                val newH = (params.height + dh.toInt()).coerceIn(400, screenHeight - 60)
                                 params.width = newW
                                 params.height = newH
                                 try {
@@ -411,16 +531,316 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     }
 
     // ==========================================
+    // FEATURE 1: OCR TEXT GRABBER OVERLAY
+    // ==========================================
+
+    fun showOcrGrabber() {
+        if (!Settings.canDrawOverlays(this)) return
+        hideBubble()
+        hidePopup()
+        hideQuickHud()
+
+        if (ocrView != null) {
+            try {
+                ocrView?.visibility = View.VISIBLE
+                return
+            } catch (e: Exception) {
+                hideOcrGrabber()
+            }
+        }
+
+        updateScreenDimensions()
+        val defaultWidth = (screenWidth * 0.90f).toInt().coerceIn(320, 980)
+        val defaultHeight = (screenHeight * 0.55f).toInt().coerceIn(400, 1300)
+
+        val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+
+        ocrParams = WindowManager.LayoutParams(
+            defaultWidth,
+            defaultHeight,
+            layoutFlag,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.CENTER
+            x = 0
+            y = 0
+        }
+
+        ocrView = ComposeView(this).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+            setViewTreeLifecycleOwner(this@FloatingAssistantService)
+            setViewTreeSavedStateRegistryOwner(this@FloatingAssistantService)
+            setViewTreeViewModelStoreOwner(this@FloatingAssistantService)
+            setContent {
+                val ocrText by _ocrExtractedText.collectAsState()
+                val isLoading by _isOcrLoading.collectAsState()
+
+                OmniAITheme {
+                    FloatingOcrTextGrabberView(
+                        extractedText = ocrText,
+                        isLoading = isLoading,
+                        onCopyAll = {
+                            Toast.makeText(this@FloatingAssistantService, "Copied all extracted text!", Toast.LENGTH_SHORT).show()
+                        },
+                        onTranslate = { text ->
+                            hideOcrGrabber()
+                            showPopup()
+                            sendMessage("Translate this extracted text to Hindi and simple English:\n\n\"$text\"", null, isScan = false)
+                        },
+                        onAskAi = { text ->
+                            hideOcrGrabber()
+                            showPopup()
+                            sendMessage("Explain / solve this text from my screen:\n\n\"$text\"", null, isScan = false)
+                        },
+                        onClose = {
+                            hideOcrGrabber()
+                            showBubble()
+                        },
+                        onDragHeader = { dx, dy ->
+                            ocrParams?.let { params ->
+                                params.x += dx.toInt()
+                                params.y += dy.toInt()
+                                try {
+                                    windowManager.updateViewLayout(ocrView, ocrParams)
+                                } catch (e: Exception) {}
+                            }
+                        }
+                    )
+                }
+            }
+        }
+
+        try {
+            windowManager.addView(ocrView, ocrParams)
+        } catch (e: Exception) {}
+    }
+
+    fun hideOcrGrabber() {
+        if (ocrView != null) {
+            try {
+                windowManager.removeView(ocrView)
+            } catch (e: Exception) {}
+            ocrView = null
+        }
+    }
+
+    fun startOcrTextExtraction(cropRect: Rect?) {
+        hidePopup()
+        hideBubble()
+        hideOcrGrabber()
+        _isOcrLoading.value = true
+        _ocrExtractedText.value = null
+
+        serviceScope.launch {
+            ScreenCapturePermissionActivity.requestPermission(
+                context = this@FloatingAssistantService,
+                onGranted = { resultCode, data ->
+                    serviceScope.launch {
+                        val bitmap = screenCaptureHelper.captureFrame(resultCode, data, cropRect)
+                        showOcrGrabber()
+
+                        if (bitmap != null) {
+                            val prompt = "Extract all readable text, questions, options, captions, or paragraphs visible in this image accurately. Return only the extracted text line by line."
+                            val result = withContext(Dispatchers.IO) {
+                                aiRepository.askAi(
+                                    messages = listOf(AiMessage(role = "user", text = prompt)),
+                                    imageBitmap = bitmap,
+                                    isScreenScan = true
+                                )
+                            }
+                            _isOcrLoading.value = false
+                            when (result) {
+                                is AiResult.Success -> {
+                                    _ocrExtractedText.value = result.text.trim()
+                                }
+                                is AiResult.Error -> {
+                                    _ocrExtractedText.value = "Failed to extract text: ${result.message}"
+                                }
+                            }
+                        } else {
+                            _isOcrLoading.value = false
+                            Toast.makeText(this@FloatingAssistantService, "Screen capture failed", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+                onDenied = {
+                    showBubble()
+                    _isOcrLoading.value = false
+                    Toast.makeText(this@FloatingAssistantService, "Screen capture permission required", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
+    }
+
+    // ==========================================
+    // FEATURE 2: AUTO-FLOATING QUICK SOLUTION HUD
+    // ==========================================
+
+    fun showQuickHud() {
+        if (!Settings.canDrawOverlays(this)) return
+        hideBubble()
+        hidePopup()
+        hideOcrGrabber()
+
+        if (hudView != null) {
+            try {
+                hudView?.visibility = View.VISIBLE
+                return
+            } catch (e: Exception) {
+                hideQuickHud()
+            }
+        }
+
+        updateScreenDimensions()
+        val defaultWidth = (screenWidth * 0.94f).toInt().coerceIn(320, 1020)
+
+        val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+
+        hudParams = WindowManager.LayoutParams(
+            defaultWidth,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            layoutFlag,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            x = 0
+            y = 120
+        }
+
+        hudView = ComposeView(this).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+            setViewTreeLifecycleOwner(this@FloatingAssistantService)
+            setViewTreeSavedStateRegistryOwner(this@FloatingAssistantService)
+            setViewTreeViewModelStoreOwner(this@FloatingAssistantService)
+            setContent {
+                val title by _hudTitle.collectAsState()
+                val solText by _hudSolutionText.collectAsState()
+                val isLoading by _isHudLoading.collectAsState()
+
+                OmniAITheme {
+                    FloatingQuickSolutionHudView(
+                        title = title,
+                        solutionText = solText,
+                        isLoading = isLoading,
+                        onSpeak = { text ->
+                            speakText(text)
+                        },
+                        onOpenFullChat = {
+                            hideQuickHud()
+                            showPopup()
+                        },
+                        onClose = {
+                            hideQuickHud()
+                            showBubble()
+                        },
+                        onDragHeader = { dx, dy ->
+                            hudParams?.let { params ->
+                                params.x += dx.toInt()
+                                params.y += dy.toInt()
+                                try {
+                                    windowManager.updateViewLayout(hudView, hudParams)
+                                } catch (e: Exception) {}
+                            }
+                        }
+                    )
+                }
+            }
+        }
+
+        try {
+            windowManager.addView(hudView, hudParams)
+        } catch (e: Exception) {}
+    }
+
+    fun hideQuickHud() {
+        if (hudView != null) {
+            try {
+                windowManager.removeView(hudView)
+            } catch (e: Exception) {}
+            hudView = null
+        }
+    }
+
+    fun startQuickHudSolve(cropRect: Rect?) {
+        hidePopup()
+        hideBubble()
+        hideQuickHud()
+        _isHudLoading.value = true
+        _hudSolutionText.value = null
+        _hudTitle.value = "Solving Screen..."
+
+        serviceScope.launch {
+            ScreenCapturePermissionActivity.requestPermission(
+                context = this@FloatingAssistantService,
+                onGranted = { resultCode, data ->
+                    serviceScope.launch {
+                        val bitmap = screenCaptureHelper.captureFrame(resultCode, data, cropRect)
+                        showQuickHud()
+
+                        if (bitmap != null) {
+                            val prompt = "Give a concise, direct, accurate solution / answer and key steps for the question/problem visible on this screen. Be clear and quick."
+                            val result = withContext(Dispatchers.IO) {
+                                aiRepository.askAi(
+                                    messages = listOf(AiMessage(role = "user", text = prompt)),
+                                    imageBitmap = bitmap,
+                                    isScreenScan = true
+                                )
+                            }
+                            _isHudLoading.value = false
+                            when (result) {
+                                is AiResult.Success -> {
+                                    _hudTitle.value = "Instant Solution"
+                                    _hudSolutionText.value = result.text.trim()
+                                }
+                                is AiResult.Error -> {
+                                    _hudTitle.value = "Error Solving"
+                                    _hudSolutionText.value = "⚠️ ${result.message}"
+                                }
+                            }
+                        } else {
+                            _isHudLoading.value = false
+                            Toast.makeText(this@FloatingAssistantService, "Screen capture failed", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+                onDenied = {
+                    showBubble()
+                    _isHudLoading.value = false
+                    Toast.makeText(this@FloatingAssistantService, "Screen capture permission required", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
+    }
+
+    // ==========================================
     // AREA CROP SELECTOR OVERLAY
     // ==========================================
 
     fun showCropOverlay() {
         hidePopup()
         hideBubble()
+        hideOcrGrabber()
+        hideQuickHud()
 
         if (cropOverlayView != null) {
-            cropOverlayView?.visibility = View.VISIBLE
-            return
+            try {
+                cropOverlayView?.visibility = View.VISIBLE
+                return
+            } catch (e: Exception) {
+                hideCropOverlay()
+            }
         }
 
         val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -439,8 +859,10 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         )
 
         cropOverlayView = ComposeView(this).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setViewTreeLifecycleOwner(this@FloatingAssistantService)
             setViewTreeSavedStateRegistryOwner(this@FloatingAssistantService)
+            setViewTreeViewModelStoreOwner(this@FloatingAssistantService)
             setContent {
                 OmniAITheme {
                     SelectedAreaCropOverlay(
@@ -477,9 +899,10 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
 
     fun startScreenScan(cropRect: Rect?) {
         _statusText.value = "Preparing Screen Scan..."
-        // Temporarily hide popup & bubble so we don't capture our own overlay
         hidePopup()
         hideBubble()
+        hideOcrGrabber()
+        hideQuickHud()
 
         serviceScope.launch {
             ScreenCapturePermissionActivity.requestPermission(
@@ -523,27 +946,32 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         serviceScope.launch {
             val app = application as OmniAIApplication
             val convId = _currentConversationId.value
-            
-            // Persist conversation & user message to Room
-            app.database.chatDao().insertConversation(
-                Conversation(
-                    id = convId,
-                    title = "Screen Scan: ${prompt.take(24)}...",
-                    updatedAt = System.currentTimeMillis(),
-                    lastMessagePreview = prompt
-                )
-            )
-            app.database.chatDao().insertMessage(userMsg)
+
+            withContext(Dispatchers.IO) {
+                try {
+                    app.database.chatDao().insertConversation(
+                        Conversation(
+                            id = convId,
+                            title = "Screen Scan: ${prompt.take(24)}...",
+                            updatedAt = System.currentTimeMillis(),
+                            lastMessagePreview = prompt
+                        )
+                    )
+                    app.database.chatDao().insertMessage(userMsg)
+                } catch (e: Exception) {}
+            }
 
             val aiMessages = _messages.value.map {
                 AiMessage(role = it.role, text = it.text)
             }
 
-            val result = aiRepository.askAi(
-                messages = aiMessages,
-                imageBitmap = bitmap,
-                isScreenScan = true
-            )
+            val result = withContext(Dispatchers.IO) {
+                aiRepository.askAi(
+                    messages = aiMessages,
+                    imageBitmap = bitmap,
+                    isScreenScan = true
+                )
+            }
 
             _isGenerating.value = false
             _statusText.value = null
@@ -557,7 +985,11 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         timestamp = System.currentTimeMillis()
                     )
                     _messages.value = _messages.value + modelMsg
-                    app.database.chatDao().insertMessage(modelMsg)
+                    withContext(Dispatchers.IO) {
+                        try {
+                            app.database.chatDao().insertMessage(modelMsg)
+                        } catch (e: Exception) {}
+                    }
                 }
                 is AiResult.Error -> {
                     val errorMsg = ChatMessage(
@@ -568,7 +1000,11 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         timestamp = System.currentTimeMillis()
                     )
                     _messages.value = _messages.value + errorMsg
-                    app.database.chatDao().insertMessage(errorMsg)
+                    withContext(Dispatchers.IO) {
+                        try {
+                            app.database.chatDao().insertMessage(errorMsg)
+                        } catch (e: Exception) {}
+                    }
                 }
             }
         }
@@ -592,25 +1028,31 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             val app = application as OmniAIApplication
             val convId = _currentConversationId.value
 
-            app.database.chatDao().insertConversation(
-                Conversation(
-                    id = convId,
-                    title = text.take(30),
-                    updatedAt = System.currentTimeMillis(),
-                    lastMessagePreview = text
-                )
-            )
-            app.database.chatDao().insertMessage(userMsg)
+            withContext(Dispatchers.IO) {
+                try {
+                    app.database.chatDao().insertConversation(
+                        Conversation(
+                            id = convId,
+                            title = text.take(30),
+                            updatedAt = System.currentTimeMillis(),
+                            lastMessagePreview = text
+                        )
+                    )
+                    app.database.chatDao().insertMessage(userMsg)
+                } catch (e: Exception) {}
+            }
 
             val aiMessages = _messages.value.map {
                 AiMessage(role = it.role, text = it.text)
             }
 
-            val result = aiRepository.askAi(
-                messages = aiMessages,
-                imageBitmap = imageBitmap,
-                isScreenScan = isScan
-            )
+            val result = withContext(Dispatchers.IO) {
+                aiRepository.askAi(
+                    messages = aiMessages,
+                    imageBitmap = imageBitmap,
+                    isScreenScan = isScan
+                )
+            }
 
             _isGenerating.value = false
 
@@ -623,7 +1065,11 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         timestamp = System.currentTimeMillis()
                     )
                     _messages.value = _messages.value + modelMsg
-                    app.database.chatDao().insertMessage(modelMsg)
+                    withContext(Dispatchers.IO) {
+                        try {
+                            app.database.chatDao().insertMessage(modelMsg)
+                        } catch (e: Exception) {}
+                    }
                 }
                 is AiResult.Error -> {
                     val errorMsg = ChatMessage(
@@ -634,7 +1080,11 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         timestamp = System.currentTimeMillis()
                     )
                     _messages.value = _messages.value + errorMsg
-                    app.database.chatDao().insertMessage(errorMsg)
+                    withContext(Dispatchers.IO) {
+                        try {
+                            app.database.chatDao().insertMessage(errorMsg)
+                        } catch (e: Exception) {}
+                    }
                 }
             }
         }
@@ -659,12 +1109,19 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
 
         hideCropOverlay()
         hidePopup()
+        hideOcrGrabber()
+        hideQuickHud()
         if (bubbleView != null) {
             try {
                 windowManager.removeView(bubbleView)
             } catch (e: Exception) {}
             bubbleView = null
         }
+        try {
+            textToSpeech?.stop()
+            textToSpeech?.shutdown()
+        } catch (e: Exception) {}
+        appViewModelStore.clear()
         activeServiceInstance = null
     }
 

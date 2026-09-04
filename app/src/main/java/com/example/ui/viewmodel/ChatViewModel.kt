@@ -328,7 +328,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         maxImageResolution: Int? = null,
         adminPin: String? = null,
         appTheme: String? = null,
-        preferredLanguage: String? = null
+        preferredLanguage: String? = null,
+        bubbleStyle: String? = null,
+        bubbleCustomImagePath: String? = null,
+        bubblePresetIcon: String? = null,
+        bubbleText: String? = null,
+        bubbleGradient: String? = null,
+        bubbleSize: String? = null,
+        bubbleAlpha: Float? = null
     ) {
         viewModelScope.launch {
             adminPrefs.updateSettings(
@@ -346,8 +353,58 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 maxImageResolution = maxImageResolution,
                 adminPin = adminPin,
                 appTheme = appTheme,
-                preferredLanguage = preferredLanguage
+                preferredLanguage = preferredLanguage,
+                bubbleStyle = bubbleStyle,
+                bubbleCustomImagePath = bubbleCustomImagePath,
+                bubblePresetIcon = bubblePresetIcon,
+                bubbleText = bubbleText,
+                bubbleGradient = bubbleGradient,
+                bubbleSize = bubbleSize,
+                bubbleAlpha = bubbleAlpha
             )
+        }
+    }
+
+    fun setCustomBubbleImage(uri: Uri, context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri)
+                if (inputStream != null) {
+                    val outputFile = java.io.File(context.filesDir, "custom_floating_icon_${System.currentTimeMillis()}.png")
+                    // Delete older files if any
+                    context.filesDir.listFiles { file -> file.name.startsWith("custom_floating_icon_") }?.forEach { it.delete() }
+                    
+                    val outputStream = java.io.FileOutputStream(outputFile)
+                    inputStream.copyTo(outputStream)
+                    inputStream.close()
+                    outputStream.flush()
+                    outputStream.close()
+
+                    adminPrefs.updateSettings(
+                        bubbleCustomImagePath = outputFile.absolutePath,
+                        bubbleStyle = if (adminSettings.value.bubbleStyle == "icon_only") "circle" else adminSettings.value.bubbleStyle
+                    )
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "Custom Floating Icon updated successfully!", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "Failed to save custom icon: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    fun removeCustomBubbleImage(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                context.filesDir.listFiles { file -> file.name.startsWith("custom_floating_icon_") }?.forEach { it.delete() }
+                adminPrefs.updateSettings(bubbleCustomImagePath = "")
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "Reset to default AI icon", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {}
         }
     }
 

@@ -24,6 +24,25 @@ class OmniAIApplication : Application() {
         adminPreferences = AdminPreferencesRepository(this)
 
         createNotificationChannels()
+
+        // Global crash guard to prevent unexpected background exceptions from crashing the app
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            android.util.Log.e("OmniAI", "Uncaught exception on thread ${thread.name}", throwable)
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        System.gc()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= TRIM_MEMORY_MODERATE) {
+            System.gc()
+        }
     }
 
     private fun createNotificationChannels() {

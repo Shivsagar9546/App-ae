@@ -40,7 +40,14 @@ data class AdminSettings(
     val openAiRequests: Int = 0,
     val screenScanRequests: Int = 0,
     val errorCount: Int = 0,
-    val lastRequestDate: String = ""
+    val lastRequestDate: String = "",
+    val bubbleStyle: String = "pill", // "pill", "circle", "icon_only", "square"
+    val bubbleCustomImagePath: String = "",
+    val bubblePresetIcon: String = "sparkle", // "sparkle", "robot", "brain", "flash", "target", "flame", "diamond", "eye"
+    val bubbleText: String = "AI ✨",
+    val bubbleGradient: String = "purple", // "purple", "cyan", "sunset", "emerald", "dark", "gold"
+    val bubbleSize: String = "medium", // "small", "medium", "large"
+    val bubbleAlpha: Float = 1.0f
 ) {
     fun maskKey(key: String): String {
         if (key.isBlank()) return "Not configured"
@@ -74,6 +81,14 @@ class AdminPreferencesRepository(private val context: Context) {
         val ADMIN_PIN = stringPreferencesKey("admin_pin")
         val APP_THEME = stringPreferencesKey("app_theme")
         val PREFERRED_LANGUAGE = stringPreferencesKey("preferred_language")
+
+        val BUBBLE_STYLE = stringPreferencesKey("bubble_style")
+        val BUBBLE_CUSTOM_IMAGE_PATH = stringPreferencesKey("bubble_custom_image_path")
+        val BUBBLE_PRESET_ICON = stringPreferencesKey("bubble_preset_icon")
+        val BUBBLE_TEXT = stringPreferencesKey("bubble_text")
+        val BUBBLE_GRADIENT = stringPreferencesKey("bubble_gradient")
+        val BUBBLE_SIZE = stringPreferencesKey("bubble_size")
+        val BUBBLE_ALPHA = androidx.datastore.preferences.core.floatPreferencesKey("bubble_alpha")
 
         val TOTAL_REQUESTS = intPreferencesKey("total_requests")
         val TODAY_REQUESTS = intPreferencesKey("today_requests")
@@ -109,6 +124,13 @@ class AdminPreferencesRepository(private val context: Context) {
             adminPin = preferences[PreferencesKeys.ADMIN_PIN] ?: "1234",
             appTheme = preferences[PreferencesKeys.APP_THEME] ?: "system",
             preferredLanguage = preferences[PreferencesKeys.PREFERRED_LANGUAGE] ?: "hinglish",
+            bubbleStyle = preferences[PreferencesKeys.BUBBLE_STYLE] ?: "pill",
+            bubbleCustomImagePath = preferences[PreferencesKeys.BUBBLE_CUSTOM_IMAGE_PATH] ?: "",
+            bubblePresetIcon = preferences[PreferencesKeys.BUBBLE_PRESET_ICON] ?: "sparkle",
+            bubbleText = preferences[PreferencesKeys.BUBBLE_TEXT] ?: "AI ✨",
+            bubbleGradient = preferences[PreferencesKeys.BUBBLE_GRADIENT] ?: "purple",
+            bubbleSize = preferences[PreferencesKeys.BUBBLE_SIZE] ?: "medium",
+            bubbleAlpha = preferences[PreferencesKeys.BUBBLE_ALPHA] ?: 1.0f,
             totalRequests = preferences[PreferencesKeys.TOTAL_REQUESTS] ?: 0,
             todayRequests = todayCount,
             geminiRequests = preferences[PreferencesKeys.GEMINI_REQUESTS] ?: 0,
@@ -136,7 +158,14 @@ class AdminPreferencesRepository(private val context: Context) {
         maxImageResolution: Int? = null,
         adminPin: String? = null,
         appTheme: String? = null,
-        preferredLanguage: String? = null
+        preferredLanguage: String? = null,
+        bubbleStyle: String? = null,
+        bubbleCustomImagePath: String? = null,
+        bubblePresetIcon: String? = null,
+        bubbleText: String? = null,
+        bubbleGradient: String? = null,
+        bubbleSize: String? = null,
+        bubbleAlpha: Float? = null
     ) {
         context.dataStore.edit { preferences ->
             defaultProvider?.let { preferences[PreferencesKeys.DEFAULT_PROVIDER] = it }
@@ -154,6 +183,13 @@ class AdminPreferencesRepository(private val context: Context) {
             adminPin?.let { preferences[PreferencesKeys.ADMIN_PIN] = it }
             appTheme?.let { preferences[PreferencesKeys.APP_THEME] = it }
             preferredLanguage?.let { preferences[PreferencesKeys.PREFERRED_LANGUAGE] = it }
+            bubbleStyle?.let { preferences[PreferencesKeys.BUBBLE_STYLE] = it }
+            bubbleCustomImagePath?.let { preferences[PreferencesKeys.BUBBLE_CUSTOM_IMAGE_PATH] = it }
+            bubblePresetIcon?.let { preferences[PreferencesKeys.BUBBLE_PRESET_ICON] = it }
+            bubbleText?.let { preferences[PreferencesKeys.BUBBLE_TEXT] = it }
+            bubbleGradient?.let { preferences[PreferencesKeys.BUBBLE_GRADIENT] = it }
+            bubbleSize?.let { preferences[PreferencesKeys.BUBBLE_SIZE] = it }
+            bubbleAlpha?.let { preferences[PreferencesKeys.BUBBLE_ALPHA] = it }
         }
     }
 
