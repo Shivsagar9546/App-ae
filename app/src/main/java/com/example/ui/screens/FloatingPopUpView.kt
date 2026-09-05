@@ -583,12 +583,21 @@ private fun FloatingMessageBubble(msg: ChatMessage) {
                     }
                 }
 
-                if (isUser) {
-                    Text(
-                        text = msg.text,
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium
+                if (!msg.imageBase64.isNullOrBlank()) {
+                    com.example.ui.components.Base64ImageView(
+                        base64String = msg.imageBase64,
+                        contentDescription = "Screen capture preview"
                     )
+                }
+
+                if (isUser) {
+                    if (msg.text.isNotBlank()) {
+                        Text(
+                            text = msg.text,
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
                 } else {
                     MarkdownText(
                         text = msg.text,

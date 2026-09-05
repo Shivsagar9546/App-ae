@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Rect
 import android.net.Uri
+import android.util.Base64
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -29,6 +30,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.util.UUID
 
@@ -124,10 +126,30 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         val convId = _currentConversationId.value
 
+        // Convert attached image to base64 for persistent chat history display
+        val imageBase64 = image?.let { bmp ->
+            try {
+                val maxDim = 800
+                var scaled = bmp
+                if (bmp.width > maxDim || bmp.height > maxDim) {
+                    val ratio = bmp.width.toFloat() / bmp.height.toFloat()
+                    val newW = if (bmp.width > bmp.height) maxDim else (maxDim * ratio).toInt()
+                    val newH = if (bmp.width > bmp.height) (maxDim / ratio).toInt() else maxDim
+                    scaled = Bitmap.createScaledBitmap(bmp, newW.coerceAtLeast(1), newH.coerceAtLeast(1), true)
+                }
+                val stream = ByteArrayOutputStream()
+                scaled.compress(Bitmap.CompressFormat.JPEG, 75, stream)
+                Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
+            } catch (e: Exception) {
+                null
+            }
+        }
+
         val userMessage = ChatMessage(
             conversationId = convId,
             role = "user",
             text = text,
+            imageBase64 = imageBase64,
             isScreenScan = isScan,
             timestamp = System.currentTimeMillis()
         )
@@ -159,10 +181,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             // Insert user message
             chatDao.insertMessage(userMessage)
 
-            // Gather context history
+            // Gather context history with imageBase64 preservation
             val history = chatDao.getMessagesList(convId)
             val aiMessages = history.map {
-                AiMessage(role = it.role, text = it.text)
+                AiMessage(role = it.role, text = it.text, imageBase64 = it.imageBase64)
             }
 
             val result = aiRepository.askAi(
@@ -213,7 +235,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             _isGenerating.value = true
             val updatedList = chatDao.getMessagesList(convId)
-            val aiMessages = updatedList.map { AiMessage(role = it.role, text = it.text) }
+            val aiMessages = updatedList.map { AiMessage(role = it.role, text = it.text, imageBase64 = it.imageBase64) }
 
             val result = aiRepository.askAi(
                 messages = aiMessages,

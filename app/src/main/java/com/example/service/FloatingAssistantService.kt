@@ -932,10 +932,27 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     }
 
     private fun sendScreenAnalysisRequest(bitmap: Bitmap, prompt: String) {
+        val imageBase64 = try {
+            val maxDim = 800
+            var scaled = bitmap
+            if (bitmap.width > maxDim || bitmap.height > maxDim) {
+                val ratio = bitmap.width.toFloat() / bitmap.height.toFloat()
+                val newW = if (bitmap.width > bitmap.height) maxDim else (maxDim * ratio).toInt()
+                val newH = if (bitmap.width > bitmap.height) (maxDim / ratio).toInt() else maxDim
+                scaled = Bitmap.createScaledBitmap(bitmap, newW.coerceAtLeast(1), newH.coerceAtLeast(1), true)
+            }
+            val stream = java.io.ByteArrayOutputStream()
+            scaled.compress(Bitmap.CompressFormat.JPEG, 75, stream)
+            android.util.Base64.encodeToString(stream.toByteArray(), android.util.Base64.NO_WRAP)
+        } catch (e: Exception) {
+            null
+        }
+
         val userMsg = ChatMessage(
             conversationId = _currentConversationId.value,
             role = "user",
             text = prompt,
+            imageBase64 = imageBase64,
             isScreenScan = true,
             timestamp = System.currentTimeMillis()
         )
