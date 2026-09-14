@@ -22,6 +22,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
@@ -43,10 +45,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -63,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.ChatMessage
 import com.example.ui.components.AnimatedTypingIndicator
+import com.example.ui.components.GeminiDirectWebView
 import com.example.ui.components.MarkdownText
 import com.example.ui.components.QuickActionChips
 import com.example.ui.theme.AiBubbleGradientEnd
@@ -86,6 +92,7 @@ fun FloatingPopUpView(
     onResize: (dw: Float, dh: Float) -> Unit
 ) {
     var inputText by remember { mutableStateOf("") }
+    var currentTab by remember { mutableIntStateOf(0) } // 0: AI Tools, 1: Gemini Direct Web
     val listState = rememberLazyListState()
 
     LaunchedEffect(messages.size) {
@@ -228,281 +235,337 @@ fun FloatingPopUpView(
                     }
                 }
 
-                // Status Banner (if capturing / analyzing screen)
-                AnimatedVisibility(visible = statusText != null) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(14.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = statusText ?: "",
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
-                    }
-                }
-
-                // Chat Messages List
-                Box(
+                // Top Tab Switcher: Smart Assistant vs Gemini Web (No API)
+                TabRow(
+                    selectedTabIndex = currentTab,
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    contentColor = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
-                        .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp)
+                        .height(38.dp)
                 ) {
-                    if (messages.isEmpty() && !isGenerating) {
-                        // Empty State / Quick Starter
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Text(
-                                text = "How can I help you?",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Tap Scan Screen to analyze what's visible on other apps, or type your question below.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.height(14.dp))
-
-                            // Large Scan Screen Action Button
-                            Button(
-                                onClick = onScanScreen,
-                                shape = RoundedCornerShape(16.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary
-                                ),
-                                modifier = Modifier.testTag("popup_initial_scan_button")
+                    Tab(
+                        selected = currentTab == 0,
+                        onClick = { currentTab = 0 },
+                        text = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Screenshot,
+                                    imageVector = Icons.Default.SmartToy,
                                     contentDescription = null,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(14.dp)
                                 )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Scan Current Screen", fontWeight = FontWeight.SemiBold)
+                                Text("Smart Tools", fontSize = 11.sp, fontWeight = if (currentTab == 0) FontWeight.Bold else FontWeight.Normal)
                             }
                         }
-                    } else {
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 10.dp)
-                        ) {
-                            items(messages) { msg ->
-                                FloatingMessageBubble(msg)
+                    )
+                    Tab(
+                        selected = currentTab == 1,
+                        onClick = { currentTab = 1 },
+                        text = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Language,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text("Gemini Web (No API)", fontSize = 11.sp, fontWeight = if (currentTab == 1) FontWeight.Bold else FontWeight.Normal)
                             }
-
-                            if (isGenerating) {
-                                item {
-                                    AnimatedTypingIndicator(
-                                        modifier = Modifier.padding(start = 4.dp, top = 4.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Quick Action Chips (Explain, Solve, Translate, etc.)
-                if (messages.isNotEmpty()) {
-                    QuickActionChips(
-                        onActionSelected = { prompt ->
-                            onSendMessage(prompt, null)
                         }
                     )
                 }
 
-                // Bottom Floating Control Bar
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                    shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-                    ) {
-                        // Quick scan tools bar
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 6.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                if (currentTab == 1) {
+                    // Direct Official Gemini Web Chat (Zero API Keys required)
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        GeminiDirectWebView(
+                            isCompact = true,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                } else {
+                    // Smart AI Tools & Chat View
+                    // Status Banner (if capturing / analyzing screen)
+                    AnimatedVisibility(visible = statusText != null) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            // Scan Screen
-                            Button(
-                                onClick = onScanScreen,
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(32.dp)
-                                    .testTag("popup_scan_screen_button")
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Screenshot,
-                                    contentDescription = "Scan Screen",
-                                    modifier = Modifier.size(13.dp)
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
                                 )
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text("Scan", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-
-                            // OCR Text Grabber
-                            Button(
-                                onClick = onOcrGrabber,
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                                ),
-                                modifier = Modifier
-                                    .weight(1.1f)
-                                    .height(32.dp)
-                                    .testTag("popup_ocr_grabber_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.TextFields,
-                                    contentDescription = "Text Grabber",
-                                    modifier = Modifier.size(13.dp)
+                                Text(
+                                    text = statusText ?: "",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text("OCR Text", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-
-                            // Quick HUD Solution
-                            Button(
-                                onClick = onQuickHud,
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(32.dp)
-                                    .testTag("popup_quick_hud_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.AutoAwesome,
-                                    contentDescription = "HUD",
-                                    modifier = Modifier.size(13.dp)
-                                )
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text("HUD", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-
-                            // Scan Selected Area
-                            Button(
-                                onClick = onAreaScan,
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(32.dp)
-                                    .testTag("popup_area_scan_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.CropFree,
-                                    contentDescription = "Area Scan",
-                                    modifier = Modifier.size(13.dp)
-                                )
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text("Crop", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
+                    }
 
-                        // Input Field with Voice & Send Buttons
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            OutlinedTextField(
-                                value = inputText,
-                                onValueChange = { inputText = it },
-                                placeholder = { Text("Ask about screen or type...", fontSize = 13.sp) },
+                    // Chat Messages List
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp)
+                    ) {
+                        if (messages.isEmpty() && !isGenerating) {
+                            // Empty State / Quick Starter
+                            Column(
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("popup_input_field"),
-                                shape = RoundedCornerShape(20.dp),
-                                singleLine = false,
-                                maxLines = 3,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-                                )
-                            )
-
-                            // Mic Button
-                            IconButton(
-                                onClick = onVoiceInput,
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
-                                    .testTag("popup_mic_button")
+                                    .fillMaxSize()
+                                    .padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Mic,
-                                    contentDescription = "Voice Input",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
+                                Text(
+                                    text = "How can I help you?",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Tap Scan Screen to analyze what's visible on other apps, or type your question below.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                // Large Scan Screen Action Button
+                                Button(
+                                    onClick = onScanScreen,
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary
+                                    ),
+                                    modifier = Modifier.testTag("popup_initial_scan_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Screenshot,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Scan Current Screen", fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        } else {
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 10.dp)
+                            ) {
+                                items(messages) { msg ->
+                                    FloatingMessageBubble(msg)
+                                }
+
+                                if (isGenerating) {
+                                    item {
+                                        AnimatedTypingIndicator(
+                                            modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Quick Action Chips (Explain, Solve, Translate, etc.)
+                    if (messages.isNotEmpty()) {
+                        QuickActionChips(
+                            onActionSelected = { prompt ->
+                                onSendMessage(prompt, null)
+                            }
+                        )
+                    }
+
+                    // Bottom Floating Control Bar
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                        ) {
+                            // Quick scan tools bar
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Scan Screen
+                                Button(
+                                    onClick = onScanScreen,
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(32.dp)
+                                        .testTag("popup_scan_screen_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Screenshot,
+                                        contentDescription = "Scan Screen",
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("Scan", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                // OCR Text Grabber
+                                Button(
+                                    onClick = onOcrGrabber,
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1.1f)
+                                        .height(32.dp)
+                                        .testTag("popup_ocr_grabber_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.TextFields,
+                                        contentDescription = "Text Grabber",
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("OCR Text", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                // Quick HUD Solution
+                                Button(
+                                    onClick = onQuickHud,
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(32.dp)
+                                        .testTag("popup_quick_hud_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = "HUD",
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("HUD", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                // Scan Selected Area
+                                Button(
+                                    onClick = onAreaScan,
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(32.dp)
+                                        .testTag("popup_area_scan_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CropFree,
+                                        contentDescription = "Area Scan",
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("Crop", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
 
-                            // Send Button
-                            FilledIconButton(
-                                onClick = {
-                                    if (inputText.isNotBlank()) {
-                                        onSendMessage(inputText.trim(), null)
-                                        inputText = ""
-                                    }
-                                },
-                                enabled = inputText.isNotBlank() && !isGenerating,
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .testTag("popup_send_button"),
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary
-                                )
+                            // Input Field with Voice & Send Buttons
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Send,
-                                    contentDescription = "Send",
-                                    modifier = Modifier.size(18.dp)
+                                OutlinedTextField(
+                                    value = inputText,
+                                    onValueChange = { inputText = it },
+                                    placeholder = { Text("Ask about screen or type...", fontSize = 13.sp) },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("popup_input_field"),
+                                    shape = RoundedCornerShape(20.dp),
+                                    singleLine = false,
+                                    maxLines = 3,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                                    )
                                 )
+
+                                // Mic Button
+                                IconButton(
+                                    onClick = onVoiceInput,
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                                        .testTag("popup_mic_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Mic,
+                                        contentDescription = "Voice Input",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                // Send Button
+                                FilledIconButton(
+                                    onClick = {
+                                        if (inputText.isNotBlank()) {
+                                            onSendMessage(inputText.trim(), null)
+                                            inputText = ""
+                                        }
+                                    },
+                                    enabled = inputText.isNotBlank() && !isGenerating,
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .testTag("popup_send_button"),
+                                    colors = IconButtonDefaults.filledIconButtonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary
+                                    )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Send,
+                                        contentDescription = "Send",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
                         }
                     }

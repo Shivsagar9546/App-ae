@@ -24,6 +24,7 @@ class OmniAIApplication : Application() {
         adminPreferences = AdminPreferencesRepository(this)
 
         createNotificationChannels()
+        com.example.service.TtsManager.init(this)
 
         // Global crash guard to prevent unexpected background exceptions from crashing the app
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()

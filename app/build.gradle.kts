@@ -15,7 +15,7 @@ android {
 
   defaultConfig {
     applicationId = "com.aistudio.omniai.wkvz"
-    minSdk = 24
+    minSdk = 31
     targetSdk = 36
     versionCode = 1
     versionName = "1.0"

@@ -22,6 +22,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -36,8 +37,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -49,15 +52,21 @@ import androidx.compose.material.icons.filled.CropFree
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Screenshot
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
@@ -67,6 +76,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -75,6 +85,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -82,9 +94,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -99,12 +113,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.ChatMessage
+import com.example.service.PdfTextExtractor
+import com.example.service.TtsManager
 import com.example.ui.components.AnimatedTypingIndicator
+import com.example.ui.components.AttachmentBottomSheet
+import com.example.ui.components.GeminiDirectWebView
 import com.example.ui.components.MarkdownText
+import com.example.ui.components.OfflineCalculatorSheet
 import com.example.ui.components.QuickActionChips
 import com.example.ui.theme.AiBubbleGradientEnd
 import com.example.ui.theme.AiBubbleGradientStart
 import com.example.ui.viewmodel.ChatViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -123,8 +143,15 @@ fun MainChatScreen(
     val adminSettings by viewModel.adminSettings.collectAsState()
     val isListening by viewModel.voiceHelper.isListening.collectAsState()
 
+    var activeMode by remember { mutableIntStateOf(0) } // 0: AI Assistant, 1: Gemini Direct Web (No API)
     var inputText by remember { mutableStateOf("") }
+    var showAttachmentMenu by remember { mutableStateOf(false) }
+    var showCalculatorSheet by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
+    val ttsSpeakingId by TtsManager.currentSpeakingId.collectAsState()
+    val isTtsSpeaking by TtsManager.isSpeaking.collectAsState()
 
     // Gallery Picker Launcher (Standard Photo Picker)
     val galleryLauncher = rememberLauncherForActivityResult(
@@ -140,6 +167,29 @@ fun MainChatScreen(
         bitmap?.let { viewModel.setAttachedBitmap(it) }
     }
 
+    // PDF Document Picker Launcher
+    val pdfLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            scope.launch {
+                Toast.makeText(context, "Extracting PDF...", Toast.LENGTH_SHORT).show()
+                val result = PdfTextExtractor.extractPdfInfo(context, it)
+                when (result) {
+                    is PdfTextExtractor.PdfExtractResult.Success -> {
+                        if (result.firstPageBitmap != null) {
+                            viewModel.setAttachedBitmap(result.firstPageBitmap)
+                        }
+                        viewModel.sendMessage("Is PDF document (${result.pageCount} pages) ko explain karo aur iske key questions/points solve karo.")
+                    }
+                    is PdfTextExtractor.PdfExtractResult.Error -> {
+                        Toast.makeText(context, "PDF Error: ${result.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+
     // Scroll to bottom on new message
     LaunchedEffect(messages.size, isGenerating) {
         if (messages.isNotEmpty()) {
@@ -153,24 +203,25 @@ fun MainChatScreen(
                 title = {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(34.dp)
+                                .size(36.dp)
                                 .background(
                                     brush = Brush.linearGradient(
                                         listOf(AiBubbleGradientStart, AiBubbleGradientEnd)
                                     ),
                                     shape = CircleShape
-                                ),
+                                )
+                                .shadow(6.dp, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.AutoAwesome,
                                 contentDescription = "AI Logo",
                                 tint = Color.White,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
 
@@ -179,11 +230,11 @@ fun MainChatScreen(
                                 text = "OmniAI",
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 17.sp
+                                    fontSize = 18.sp
                                 )
                             )
                             Text(
-                                text = "${adminSettings.defaultProvider.uppercase()} • ${if (adminSettings.defaultProvider == "openai") adminSettings.openAiModel else adminSettings.geminiModel}",
+                                text = "Screen Assistant & Solver",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -192,15 +243,21 @@ fun MainChatScreen(
                 },
                 actions = {
                     // Floating Assistant Hub Shortcut
-                    IconButton(
+                    FilledTonalButton(
                         onClick = onNavigateToFloatingHub,
-                        modifier = Modifier.testTag("nav_floating_hub_button")
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier
+                            .height(34.dp)
+                            .testTag("nav_floating_hub_button")
                     ) {
                         Icon(
                             imageVector = Icons.Default.PictureInPictureAlt,
-                            contentDescription = "Floating Assistant Overlay",
-                            tint = MaterialTheme.colorScheme.primary
+                            contentDescription = "Floating Hub",
+                            modifier = Modifier.size(16.dp)
                         )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Overlay", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     }
 
                     // Chat History
@@ -214,19 +271,7 @@ fun MainChatScreen(
                         )
                     }
 
-                    // Admin Panel
-                    IconButton(
-                        onClick = onNavigateToAdmin,
-                        modifier = Modifier.testTag("nav_admin_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Lock,
-                            contentDescription = "Admin Panel",
-                            tint = MaterialTheme.colorScheme.tertiary
-                        )
-                    }
-
-                    // Settings
+                    // Settings (Admin is also accessible inside Settings)
                     IconButton(
                         onClick = onNavigateToSettings,
                         modifier = Modifier.testTag("nav_settings_button")
@@ -237,15 +282,17 @@ fun MainChatScreen(
                         )
                     }
 
-                    // New Chat
-                    IconButton(
-                        onClick = { viewModel.startNewChat() },
-                        modifier = Modifier.testTag("nav_new_chat_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "New Chat"
-                        )
+                    // New Chat (when messages exist)
+                    if (messages.isNotEmpty()) {
+                        IconButton(
+                            onClick = { viewModel.startNewChat() },
+                            modifier = Modifier.testTag("nav_new_chat_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "New Chat"
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -263,27 +310,90 @@ fun MainChatScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Status bar message (e.g. "Screen frame capturing...")
-            AnimatedVisibility(visible = statusMessage != null) {
-                Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    modifier = Modifier.fillMaxWidth()
+            // Segmented Tab Switcher: Omni Assistant vs Gemini Web (No API)
+            TabRow(
+                selectedTabIndex = activeMode,
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Tab(
+                    selected = activeMode == 0,
+                    onClick = { activeMode = 0 },
+                    text = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SmartToy,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                "Smart Assistant",
+                                fontWeight = if (activeMode == 0) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
+                )
+                Tab(
+                    selected = activeMode == 1,
+                    onClick = { activeMode = 1 },
+                    text = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Language,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                "Gemini Web (No API)",
+                                fontWeight = if (activeMode == 1) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
+                )
+            }
+
+            if (activeMode == 1) {
+                // Direct Google Gemini Web Chat (Uses official Google interface, 0 API config)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .navigationBarsPadding()
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    GeminiDirectWebView(
+                        isCompact = false,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            } else {
+                // Status bar message (e.g. "Screen frame capturing...")
+                AnimatedVisibility(visible = statusMessage != null) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = statusMessage ?: "",
-                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = statusMessage ?: "",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
                     }
                 }
             }
@@ -302,7 +412,24 @@ fun MainChatScreen(
                         onScanScreenClicked = {
                             viewModel.triggerScreenScan(context)
                         },
-                        onFloatingAssistantClicked = onNavigateToFloatingHub
+                        onFloatingAssistantClicked = onNavigateToFloatingHub,
+                        onSwitchToGeminiWeb = {
+                            activeMode = 1
+                        },
+                        onCameraClicked = {
+                            cameraLauncher.launch(null)
+                        },
+                        onGalleryClicked = {
+                            galleryLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        onPdfClicked = {
+                            pdfLauncher.launch("application/pdf")
+                        },
+                        onCalculatorClicked = {
+                            showCalculatorSheet = true
+                        }
                     )
                 } else {
                     LazyColumn(
@@ -314,8 +441,25 @@ fun MainChatScreen(
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp)
                     ) {
                         items(messages) { msg ->
+                            val isThisMsgSpeaking = isTtsSpeaking && (ttsSpeakingId == msg.id.toString())
                             ChatMessageCard(
                                 message = msg,
+                                isSpeaking = isThisMsgSpeaking,
+                                onSpeak = {
+                                    if (isThisMsgSpeaking) {
+                                        TtsManager.stop()
+                                    } else {
+                                        TtsManager.speak(msg.text, msg.id.toString())
+                                    }
+                                },
+                                onShare = {
+                                    val sendIntent = Intent().apply {
+                                        action = Intent.ACTION_SEND
+                                        putExtra(Intent.EXTRA_TEXT, "✨ Solution by OmniAI Assistant:\n\n${msg.text}")
+                                        type = "text/plain"
+                                    }
+                                    context.startActivity(Intent.createChooser(sendIntent, "Share solution"))
+                                },
                                 onCopyText = {
                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                     val clip = ClipData.newPlainText("AI Message", msg.text)
@@ -408,149 +552,161 @@ fun MainChatScreen(
                 )
             }
 
-            // Bottom Input & Controls Dock
+            // Bottom Input & Controls Dock (ChatGPT-Style)
             Surface(
                 color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 4.dp,
+                tonalElevation = 6.dp,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .shadow(12.dp)
+                    .shadow(8.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    // ChatGPT '+' Attachment Button
+                    Surface(
+                        onClick = { showAttachmentMenu = true },
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .testTag("chatgpt_plus_button")
                     ) {
-                        // Image attachment button
-                        IconButton(
-                            onClick = {
-                                galleryLauncher.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                )
-                            },
-                            modifier = Modifier.size(40.dp).testTag("attach_gallery_button")
-                        ) {
+                        Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                imageVector = Icons.Default.Image,
-                                contentDescription = "Attach Image",
-                                tint = MaterialTheme.colorScheme.primary
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Add attachments and tools",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(22.dp)
                             )
                         }
+                    }
 
-                        // Camera button
-                        IconButton(
-                            onClick = { cameraLauncher.launch(null) },
-                            modifier = Modifier.size(40.dp).testTag("attach_camera_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CameraAlt,
-                                contentDescription = "Take Photo",
-                                tint = MaterialTheme.colorScheme.primary
+                    // Spacious ChatGPT-Style Text Input Pill
+                    OutlinedTextField(
+                        value = inputText,
+                        onValueChange = { inputText = it },
+                        placeholder = {
+                            Text(
+                                text = "Message...",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                style = MaterialTheme.typography.bodyMedium
                             )
-                        }
-
-                        // Scan Screen Quick Action
-                        IconButton(
-                            onClick = { viewModel.triggerScreenScan(context) },
-                            modifier = Modifier.size(40.dp).testTag("main_screen_scan_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Screenshot,
-                                contentDescription = "Scan Screen",
-                                tint = MaterialTheme.colorScheme.secondary
-                            )
-                        }
-
-                        // Text input field
-                        OutlinedTextField(
-                            value = inputText,
-                            onValueChange = { inputText = it },
-                            placeholder = { Text("Ask anything in English/Hindi/Hinglish...") },
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("main_chat_input"),
-                            shape = RoundedCornerShape(24.dp),
-                            maxLines = 4,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = Color.Transparent
-                            )
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("main_chat_input"),
+                        shape = RoundedCornerShape(26.dp),
+                        maxLines = 5,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                            unfocusedBorderColor = Color.Transparent
                         )
+                    )
 
-                        // Voice Mic Button
-                        IconButton(
-                            onClick = {
-                                if (isListening) {
-                                    viewModel.voiceHelper.stopListening()
-                                } else {
-                                    viewModel.voiceHelper.startListening(
-                                        languageCode = "en-IN",
-                                        onResult = { recognized ->
-                                            inputText = recognized
-                                        }
-                                    )
-                                }
-                            },
-                            modifier = Modifier
-                                .size(40.dp)
-                                .background(
-                                    if (isListening) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                    CircleShape
+                    // Voice Mic Button
+                    Surface(
+                        onClick = {
+                            if (isListening) {
+                                viewModel.voiceHelper.stopListening()
+                            } else {
+                                viewModel.voiceHelper.startListening(
+                                    languageCode = "en-IN",
+                                    onResult = { recognized ->
+                                        inputText = recognized
+                                    }
                                 )
-                                .testTag("main_chat_mic_button")
-                        ) {
+                            }
+                        },
+                        shape = CircleShape,
+                        color = if (isListening) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .testTag("main_chat_mic_button")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = Icons.Default.Mic,
                                 contentDescription = "Voice Input",
-                                tint = if (isListening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                                tint = if (isListening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
+                    }
 
-                        // Send / Stop Button
-                        if (isGenerating) {
-                            FilledIconButton(
-                                onClick = { viewModel.stopGeneration() },
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.error
-                                ),
-                                modifier = Modifier.size(40.dp).testTag("stop_generation_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Stop,
-                                    contentDescription = "Stop",
-                                    tint = Color.White
-                                )
-                            }
-                        } else {
-                            FilledIconButton(
-                                onClick = {
-                                    if (inputText.isNotBlank() || attachedBitmap != null) {
-                                        viewModel.sendMessage(inputText)
-                                        inputText = ""
-                                    }
-                                },
-                                enabled = inputText.isNotBlank() || attachedBitmap != null,
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary
-                                ),
-                                modifier = Modifier.size(40.dp).testTag("main_chat_send_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Send,
-                                    contentDescription = "Send",
-                                    tint = Color.White
-                                )
-                            }
+                    // Send / Stop Button
+                    if (isGenerating) {
+                        FilledIconButton(
+                            onClick = { viewModel.stopGeneration() },
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.error
+                            ),
+                            modifier = Modifier.size(42.dp).testTag("stop_generation_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Stop,
+                                contentDescription = "Stop",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    } else {
+                        val canSend = inputText.isNotBlank() || attachedBitmap != null
+                        FilledIconButton(
+                            onClick = {
+                                if (canSend) {
+                                    viewModel.sendMessage(inputText)
+                                    inputText = ""
+                                }
+                            },
+                            enabled = canSend,
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = if (canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                            ),
+                            modifier = Modifier.size(42.dp).testTag("main_chat_send_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Send,
+                                contentDescription = "Send",
+                                tint = if (canSend) Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                 }
             }
         }
+    }
+
+    if (showAttachmentMenu) {
+        AttachmentBottomSheet(
+            onDismiss = { showAttachmentMenu = false },
+            onCameraClick = { cameraLauncher.launch(null) },
+            onGalleryClick = {
+                galleryLauncher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                )
+            },
+            onPdfClick = { pdfLauncher.launch("application/pdf") },
+            onScreenScanClick = { viewModel.triggerScreenScan(context) },
+            onCalculatorClick = { showCalculatorSheet = true }
+        )
+    }
+
+    if (showCalculatorSheet) {
+        OfflineCalculatorSheet(
+            onDismiss = { showCalculatorSheet = false },
+            onPasteResult = { res ->
+                inputText = if (inputText.isBlank()) res else "$inputText $res"
+            }
+        )
     }
 }
 
@@ -558,160 +714,235 @@ fun MainChatScreen(
 private fun WelcomeHomeLayout(
     onPromptSelected: (String) -> Unit,
     onScanScreenClicked: () -> Unit,
-    onFloatingAssistantClicked: () -> Unit
+    onFloatingAssistantClicked: () -> Unit,
+    onSwitchToGeminiWeb: () -> Unit,
+    onCameraClicked: () -> Unit,
+    onGalleryClicked: () -> Unit,
+    onPdfClicked: () -> Unit,
+    onCalculatorClicked: () -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp, vertical = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.Top
     ) {
-        // Glowing Hero Icon
+        Spacer(modifier = Modifier.height(28.dp))
+
+        // ChatGPT-like clean glowing AI emblem
         Box(
             modifier = Modifier
-                .size(68.dp)
+                .size(64.dp)
                 .background(
                     brush = Brush.linearGradient(
                         listOf(AiBubbleGradientStart, AiBubbleGradientEnd)
                     ),
                     shape = CircleShape
                 )
-                .shadow(12.dp, CircleShape),
+                .shadow(12.dp, CircleShape, spotColor = MaterialTheme.colorScheme.primary),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Default.AutoAwesome,
                 contentDescription = null,
                 tint = Color.White,
-                modifier = Modifier.size(34.dp)
+                modifier = Modifier.size(32.dp)
             )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "OmniAI",
-            style = MaterialTheme.typography.headlineMedium.copy(
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = (-0.5).sp
+            text = "How can I help you today?",
+            style = MaterialTheme.typography.titleLarge.copy(
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.3).sp
             ),
             color = MaterialTheme.colorScheme.onBackground
         )
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(28.dp))
 
-        Text(
-            text = "Your smart screen assistant for instant solutions, homework & scans",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Floating Assistant Action Card
-        Surface(
-            onClick = onFloatingAssistantClicked,
-            shape = RoundedCornerShape(18.dp),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp)
-                .testTag("welcome_floating_hub_card")
+        // Sleek 2x2 Feature Cards
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Row(
-                modifier = Modifier.padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            Surface(
+                onClick = onCameraClicked,
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(90.dp)
             ) {
-                Box(
+                Column(
                     modifier = Modifier
-                        .size(42.dp)
-                        .background(
-                            brush = Brush.linearGradient(listOf(AiBubbleGradientStart, AiBubbleGradientEnd)),
-                            shape = RoundedCornerShape(12.dp)
-                        ),
-                    contentAlignment = Alignment.Center
+                        .fillMaxSize()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     Icon(
-                        imageVector = Icons.Default.PictureInPictureAlt,
+                        imageVector = Icons.Default.CameraAlt,
                         contentDescription = null,
-                        tint = Color.White,
+                        tint = Color(0xFF3B82F6),
                         modifier = Modifier.size(22.dp)
                     )
-                }
-
-                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Floating Assistant & Screen Overlay",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                    Text(
-                        text = "Scan and solve questions over any app",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                        text = "Scan Problem",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
-        }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Starter prompt chips
-        Text(
-            text = "Suggested Questions",
-            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.align(Alignment.Start)
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        val starterPrompts = listOf(
-            Pair("Ye question step-by-step solve karo (Hinglish/English)", Icons.Default.Calculate),
-            Pair("Screen par jo likha hai simple language me samjhao", Icons.Default.Description),
-            Pair("Scan any math/physics question and give final answer", Icons.Default.CropFree)
-        )
-
-        starterPrompts.forEach { (prompt, icon) ->
             Surface(
-                onClick = { onPromptSelected(prompt) },
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
+                onClick = onFloatingAssistantClicked,
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)),
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 3.dp)
+                    .weight(1f)
+                    .height(90.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     Icon(
-                        imageVector = icon,
+                        imageVector = Icons.Default.Screenshot,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
+                        tint = Color(0xFF06B6D4),
+                        modifier = Modifier.size(22.dp)
                     )
                     Text(
-                        text = prompt,
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = "Floating Overlay",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Surface(
+                onClick = onPdfClicked,
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(90.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PictureAsPdf,
+                        contentDescription = null,
+                        tint = Color(0xFFEF4444),
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Text(
+                        text = "Summarize PDF",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+
+            Surface(
+                onClick = onSwitchToGeminiWeb,
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(90.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Language,
+                        contentDescription = null,
+                        tint = Color(0xFF8B5CF6),
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Text(
+                        text = "Gemini Direct",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Smart Prompt Starters
+        val starterPrompts = listOf(
+            "Solve math problem step by step",
+            "Explain physics or chemistry concept",
+            "Translate text into Hindi & Hinglish"
+        )
+
+        starterPrompts.forEach { prompt ->
+            Surface(
+                onClick = { onPromptSelected(prompt) },
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = prompt,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Icon(
+                        imageVector = Icons.Default.Send,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
     }
 }
 
 @Composable
 private fun ChatMessageCard(
     message: ChatMessage,
+    isSpeaking: Boolean,
+    onSpeak: () -> Unit,
+    onShare: () -> Unit,
     onCopyText: () -> Unit,
     onRegenerate: () -> Unit
 ) {
@@ -811,11 +1042,32 @@ private fun ChatMessageCard(
                             text = message.text,
                             textColor = if (message.isError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface
                         )
+                        if (message.isError) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = onRegenerate,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error,
+                                    contentColor = MaterialTheme.colorScheme.onError
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Retry",
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Retry Answer (Auto-Fallback)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
             }
 
-            // ChatGPT style bottom action bar (Copy, Regenerate, timestamp)
+            // ChatGPT style bottom action bar (Speak, Share, Copy, Regenerate)
             if (!isUser && !message.isError) {
                 Row(
                     modifier = Modifier
@@ -823,6 +1075,37 @@ private fun ChatMessageCard(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // TTS Audio Speaker Button
+                    IconButton(
+                        onClick = onSpeak,
+                        modifier = Modifier
+                            .size(28.dp)
+                            .testTag("tts_speak_button")
+                    ) {
+                        Icon(
+                            imageVector = if (isSpeaking) Icons.Default.Stop else Icons.Default.VolumeUp,
+                            contentDescription = if (isSpeaking) "Stop voice" else "Read aloud",
+                            tint = if (isSpeaking) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    // Share Button
+                    IconButton(
+                        onClick = onShare,
+                        modifier = Modifier
+                            .size(28.dp)
+                            .testTag("share_response_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Share response",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
+
+                    // Copy Button
                     IconButton(
                         onClick = onCopyText,
                         modifier = Modifier
@@ -837,6 +1120,7 @@ private fun ChatMessageCard(
                         )
                     }
 
+                    // Regenerate Button
                     IconButton(
                         onClick = onRegenerate,
                         modifier = Modifier

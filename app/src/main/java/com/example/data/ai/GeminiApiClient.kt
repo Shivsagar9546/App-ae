@@ -46,115 +46,158 @@ class GeminiApiClient {
             )
         }
 
-        val targetModel = if (model.isNotBlank()) model else "gemini-3.5-flash"
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/$targetModel:generateContent?key=$key"
+        val requestedModel = if (model.isNotBlank()) model else "gemini-3.5-flash"
+        val modelsToTry = mutableListOf<String>().apply {
+            add(requestedModel)
+            // Cascade fallbacks if high demand / overloaded
+            if (requestedModel != "gemini-2.5-flash-preview-12-2025") add("gemini-2.5-flash-preview-12-2025")
+            if (requestedModel != "gemini-3.1-flash-lite-preview") add("gemini-3.1-flash-lite-preview")
+            if (requestedModel != "gemini-flash-latest") add("gemini-flash-latest")
+            if (requestedModel != "gemini-3.1-pro-preview") add("gemini-3.1-pro-preview")
+        }.distinct()
 
-        try {
-            val rootJson = JSONObject()
+        var lastErrorMsg = "Unable to reach Gemini servers."
+        var isQuotaOrKey = false
 
-            // System Instruction
-            if (systemPrompt.isNotBlank()) {
-                val sysInst = JSONObject()
-                val sysParts = JSONArray()
-                sysParts.put(JSONObject().put("text", systemPrompt))
-                sysInst.put("parts", sysParts)
-                rootJson.put("systemInstruction", sysInst)
-            }
+        for (targetModel in modelsToTry) {
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$targetModel:generateContent?key=$key"
+            try {
+                val rootJson = JSONObject()
 
-            // Contents
-            val contentsArray = JSONArray()
-            messages.forEachIndexed { index, msg ->
-                val contentObj = JSONObject()
-                val isUser = msg.role.equals("user", ignoreCase = true)
-                contentObj.put("role", if (isUser) "user" else "model")
-
-                val partsArray = JSONArray()
-                if (msg.text.isNotBlank()) {
-                    partsArray.put(JSONObject().put("text", msg.text))
+                // System Instruction
+                if (systemPrompt.isNotBlank()) {
+                    val sysInst = JSONObject()
+                    val sysParts = JSONArray()
+                    sysParts.put(JSONObject().put("text", systemPrompt))
+                    sysInst.put("parts", sysParts)
+                    rootJson.put("systemInstruction", sysInst)
                 }
 
-                // If this is the latest message and has image, attach it
-                val imgData = if (index == messages.lastIndex) (imageInlineBase64 ?: msg.imageBase64) else msg.imageBase64
-                if (!imgData.isNullOrBlank()) {
-                    val inlineDataObj = JSONObject()
-                    inlineDataObj.put("mimeType", "image/jpeg")
-                    inlineDataObj.put("data", imgData)
-                    partsArray.put(JSONObject().put("inlineData", inlineDataObj))
+                // Contents
+                val contentsArray = JSONArray()
+                messages.forEachIndexed { index, msg ->
+                    val contentObj = JSONObject()
+                    val isUser = msg.role.equals("user", ignoreCase = true)
+                    contentObj.put("role", if (isUser) "user" else "model")
+
+                    val partsArray = JSONArray()
+                    if (msg.text.isNotBlank()) {
+                        partsArray.put(JSONObject().put("text", msg.text))
+                    }
+
+                    // If this is the latest message and has image, attach it
+                    val imgData = if (index == messages.lastIndex) (imageInlineBase64 ?: msg.imageBase64) else msg.imageBase64
+                    if (!imgData.isNullOrBlank()) {
+                        val inlineDataObj = JSONObject()
+                        inlineDataObj.put("mimeType", "image/jpeg")
+                        inlineDataObj.put("data", imgData)
+                        partsArray.put(JSONObject().put("inlineData", inlineDataObj))
+                    }
+
+                    if (partsArray.length() > 0) {
+                        contentObj.put("parts", partsArray)
+                        contentsArray.put(contentObj)
+                    }
                 }
 
-                if (partsArray.length() > 0) {
+                // If empty, add a default prompt
+                if (contentsArray.length() == 0) {
+                    val contentObj = JSONObject()
+                    contentObj.put("role", "user")
+                    val partsArray = JSONArray()
+                    partsArray.put(JSONObject().put("text", "Hello"))
                     contentObj.put("parts", partsArray)
                     contentsArray.put(contentObj)
                 }
-            }
 
-            // If empty, add a default prompt
-            if (contentsArray.length() == 0) {
-                val contentObj = JSONObject()
-                contentObj.put("role", "user")
-                val partsArray = JSONArray()
-                partsArray.put(JSONObject().put("text", "Hello"))
-                contentObj.put("parts", partsArray)
-                contentsArray.put(contentObj)
-            }
+                rootJson.put("contents", contentsArray)
 
-            rootJson.put("contents", contentsArray)
+                // Generation config
+                val genConfig = JSONObject()
+                genConfig.put("temperature", 0.7)
+                rootJson.put("generationConfig", genConfig)
 
-            // Generation config
-            val genConfig = JSONObject()
-            genConfig.put("temperature", 0.7)
-            rootJson.put("generationConfig", genConfig)
+                val requestBody = rootJson.toString().toRequestBody(jsonMediaType)
+                val request = Request.Builder()
+                    .url(url)
+                    .post(requestBody)
+                    .build()
 
-            val requestBody = rootJson.toString().toRequestBody(jsonMediaType)
-            val request = Request.Builder()
-                .url(url)
-                .post(requestBody)
-                .build()
+                val response = client.newCall(request).execute()
+                val responseString = response.body?.string() ?: ""
 
-            val response = client.newCall(request).execute()
-            val responseString = response.body?.string() ?: ""
-
-            if (!response.isSuccessful) {
-                val errorMsg = try {
-                    val errorJson = JSONObject(responseString)
-                    errorJson.optJSONObject("error")?.optString("message") ?: "HTTP ${response.code}: $responseString"
-                } catch (e: Exception) {
-                    "HTTP ${response.code}: $responseString"
-                }
-                return@withContext AiResult.Error(
-                    errorMsg,
-                    isQuotaOrKeyError = response.code == 400 || response.code == 403 || response.code == 429
-                )
-            }
-
-            val respJson = JSONObject(responseString)
-            val candidates = respJson.optJSONArray("candidates")
-            if (candidates != null && candidates.length() > 0) {
-                val firstCandidate = candidates.getJSONObject(0)
-                val content = firstCandidate.optJSONObject("content")
-                val parts = content?.optJSONArray("parts")
-                val textBuilder = StringBuilder()
-                if (parts != null) {
-                    for (i in 0 until parts.length()) {
-                        val part = parts.getJSONObject(i)
-                        textBuilder.append(part.optString("text", ""))
+                if (!response.isSuccessful) {
+                    val errorMsg = try {
+                        val errorJson = JSONObject(responseString)
+                        errorJson.optJSONObject("error")?.optString("message") ?: "HTTP ${response.code}: $responseString"
+                    } catch (e: Exception) {
+                        "HTTP ${response.code}: $responseString"
                     }
-                }
-                val text = textBuilder.toString()
-                if (text.isNotBlank()) {
-                    return@withContext AiResult.Success(
-                        text = text,
-                        providerUsed = "Gemini",
-                        modelUsed = targetModel
+                    lastErrorMsg = errorMsg
+                    isQuotaOrKey = response.code == 400 || response.code == 403
+
+                    // If it's a high demand (503 / 429 / UNAVAILABLE / High Demand / Overloaded), attempt fallback model
+                    val isHighDemandOrOverload = response.code == 503 || 
+                            response.code == 429 || 
+                            response.code == 500 || 
+                            response.code == 502 || 
+                            response.code == 504 || 
+                            errorMsg.contains("high demand", ignoreCase = true) ||
+                            errorMsg.contains("overloaded", ignoreCase = true) ||
+                            errorMsg.contains("UNAVAILABLE", ignoreCase = true) ||
+                            errorMsg.contains("RESOURCE_EXHAUSTED", ignoreCase = true)
+
+                    if (isHighDemandOrOverload && targetModel != modelsToTry.last()) {
+                        Log.w("GeminiApiClient", "Model $targetModel is overloaded ($errorMsg). Trying next fallback model...")
+                        kotlinx.coroutines.delay(400)
+                        continue
+                    }
+
+                    return@withContext AiResult.Error(
+                        errorMsg,
+                        isQuotaOrKeyError = isQuotaOrKey || response.code == 429
                     )
                 }
-            }
 
-            return@withContext AiResult.Error("No response generated from Gemini.")
-        } catch (e: Exception) {
-            Log.e("GeminiApiClient", "Generation error", e)
-            return@withContext AiResult.Error("Network error connecting to Gemini: ${e.localizedMessage ?: e.message}")
+                val respJson = JSONObject(responseString)
+                val candidates = respJson.optJSONArray("candidates")
+                if (candidates != null && candidates.length() > 0) {
+                    val firstCandidate = candidates.getJSONObject(0)
+                    val content = firstCandidate.optJSONObject("content")
+                    val parts = content?.optJSONArray("parts")
+                    val textBuilder = StringBuilder()
+                    if (parts != null) {
+                        for (i in 0 until parts.length()) {
+                            val part = parts.getJSONObject(i)
+                            textBuilder.append(part.optString("text", ""))
+                        }
+                    }
+                    val text = textBuilder.toString()
+                    if (text.isNotBlank()) {
+                        return@withContext AiResult.Success(
+                            text = text,
+                            providerUsed = "Gemini",
+                            modelUsed = targetModel
+                        )
+                    }
+                }
+
+                // If candidate was empty, try next model
+                if (targetModel != modelsToTry.last()) {
+                    continue
+                }
+                return@withContext AiResult.Error("No response generated from Gemini.")
+            } catch (e: Exception) {
+                Log.e("GeminiApiClient", "Generation error on $targetModel", e)
+                lastErrorMsg = "Network error connecting to Gemini: ${e.localizedMessage ?: e.message}"
+                if (targetModel != modelsToTry.last()) {
+                    kotlinx.coroutines.delay(300)
+                    continue
+                }
+            }
         }
+
+        return@withContext AiResult.Error(lastErrorMsg, isQuotaOrKeyError = isQuotaOrKey)
     }
 
     suspend fun testConnection(apiKey: String, model: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {

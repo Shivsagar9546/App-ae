@@ -75,11 +75,19 @@ class ScreenCaptureHelper(private val context: Context) {
                 backgroundThread = HandlerThread("ScreenCaptureBackgroundThread").apply { start() }
                 val backgroundHandler = Handler(backgroundThread.looper)
 
+                // Android 14+ requires registering a callback before creating virtual display
+                val projectionCallback = object : MediaProjection.Callback() {
+                    override fun onStop() {
+                        cleanup()
+                    }
+                }
+                mediaProjection.registerCallback(projectionCallback, backgroundHandler)
+
                 imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
 
                 imageReader.setOnImageAvailableListener({ reader ->
                     try {
-                        val image = reader.acquireLatestImage()
+                        val image = reader.acquireLatestImage() ?: reader.acquireNextImage()
                         if (image != null) {
                             val planes = image.planes
                             val buffer = planes[0].buffer
@@ -102,7 +110,7 @@ class ScreenCaptureHelper(private val context: Context) {
                             }
 
                             // If user selected a specific area rectangle, crop to that area
-                            val finalBitmap = if (cropRect != null && cropRect.width() > 10 && cropRect.height() > 10) {
+                            val croppedBitmap = if (cropRect != null && cropRect.width() > 10 && cropRect.height() > 10) {
                                 val left = cropRect.left.coerceIn(0, width - 1)
                                 val top = cropRect.top.coerceIn(0, height - 1)
                                 val cropW = cropRect.width().coerceIn(1, width - left)
@@ -116,6 +124,21 @@ class ScreenCaptureHelper(private val context: Context) {
                                 cleanBitmap
                             }
 
+                            // Memory & Thermal Optimization: Downscale if larger than 1280px to prevent CPU spikes / RAM heating
+                            val maxDim = 1280
+                            val finalBitmap = if (croppedBitmap.width > maxDim || croppedBitmap.height > maxDim) {
+                                val scale = maxDim.toFloat() / maxOf(croppedBitmap.width, croppedBitmap.height)
+                                val targetW = (croppedBitmap.width * scale).toInt().coerceAtLeast(1)
+                                val targetH = (croppedBitmap.height * scale).toInt().coerceAtLeast(1)
+                                val scaled = Bitmap.createScaledBitmap(croppedBitmap, targetW, targetH, true)
+                                if (croppedBitmap != scaled) {
+                                    croppedBitmap.recycle()
+                                }
+                                scaled
+                            } else {
+                                croppedBitmap
+                            }
+
                             cleanup()
 
                             if (isResumed.compareAndSet(false, true) && continuation.isActive) {
@@ -123,6 +146,7 @@ class ScreenCaptureHelper(private val context: Context) {
                             }
                         }
                     } catch (e: Exception) {
+                        android.util.Log.e("ScreenCaptureHelper", "Error acquiring frame", e)
                         cleanup()
                         if (isResumed.compareAndSet(false, true) && continuation.isActive) {
                             continuation.resume(null)
@@ -141,15 +165,16 @@ class ScreenCaptureHelper(private val context: Context) {
                     backgroundHandler
                 )
 
-                // Timeout fallback after 3 seconds if image listener doesn't fire
+                // Timeout fallback after 6 seconds if image listener doesn't fire
                 backgroundHandler.postDelayed({
                     cleanup()
                     if (isResumed.compareAndSet(false, true) && continuation.isActive) {
                         continuation.resume(null)
                     }
-                }, 3000)
+                }, 6000)
 
             } catch (e: Exception) {
+                android.util.Log.e("ScreenCaptureHelper", "Error starting projection", e)
                 cleanup()
                 if (isResumed.compareAndSet(false, true) && continuation.isActive) {
                     continuation.resume(null)

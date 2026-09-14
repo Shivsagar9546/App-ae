@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.Icon
@@ -34,7 +35,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -69,6 +69,9 @@ fun MarkdownText(
                         language = block.language,
                         code = block.code
                     )
+                }
+                is MarkdownBlock.MathBlock -> {
+                    MathFormulaCard(formula = block.formula)
                 }
                 is MarkdownBlock.Header -> {
                     Text(
@@ -109,6 +112,76 @@ fun MarkdownText(
                         lineHeight = 22.sp
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun MathFormulaCard(formula: String) {
+    val context = LocalContext.current
+    var copied by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val formattedFormula = remember(formula) { formatMathSymbols(formula) }
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Calculate,
+                    contentDescription = "Math Formula",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+
+                Box(modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                    Text(
+                        text = formattedFormula,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val clip = ClipData.newPlainText("Math Formula", formula)
+                    clipboard.setPrimaryClip(clip)
+                    Toast.makeText(context, "Formula copied", Toast.LENGTH_SHORT).show()
+                    copied = true
+                    scope.launch {
+                        delay(2000)
+                        copied = false
+                    }
+                },
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    imageVector = if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
+                    contentDescription = "Copy formula",
+                    tint = if (copied) Color(0xFF10B981) else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp)
+                )
             }
         }
     }
@@ -198,6 +271,7 @@ sealed class MarkdownBlock {
     data class Header(val level: Int, val content: String) : MarkdownBlock()
     data class BulletPoint(val content: String) : MarkdownBlock()
     data class CodeBlock(val language: String, val code: String) : MarkdownBlock()
+    data class MathBlock(val formula: String) : MarkdownBlock()
 }
 
 fun parseMarkdownBlocks(rawText: String): List<MarkdownBlock> {
@@ -208,6 +282,27 @@ fun parseMarkdownBlocks(rawText: String): List<MarkdownBlock> {
     while (i < lines.size) {
         val line = lines[i]
 
+        // Math Block detection ($$ formula $$)
+        if (line.trim().startsWith("$$") && line.trim().endsWith("$$") && line.trim().length > 4) {
+            val formula = line.trim().removePrefix("$$").removeSuffix("$$").trim()
+            blocks.add(MarkdownBlock.MathBlock(formula))
+            i++
+            continue
+        }
+
+        if (line.trim() == "$$") {
+            val mathLines = mutableListOf<String>()
+            i++
+            while (i < lines.size && lines[i].trim() != "$$") {
+                mathLines.add(lines[i])
+                i++
+            }
+            blocks.add(MarkdownBlock.MathBlock(mathLines.joinToString(" ")))
+            i++
+            continue
+        }
+
+        // Code Block detection
         if (line.trim().startsWith("```")) {
             val language = line.trim().removePrefix("```").trim()
             val codeLines = mutableListOf<String>()
@@ -245,19 +340,49 @@ fun parseMarkdownBlocks(rawText: String): List<MarkdownBlock> {
     return blocks
 }
 
+fun formatMathSymbols(raw: String): String {
+    return raw
+        .replace("\\frac{", "(")
+        .replace("}{", ")/(")
+        .replace("}", ")")
+        .replace("\\sqrt{", "√(")
+        .replace("\\sqrt", "√")
+        .replace("\\times", " × ")
+        .replace("\\div", " ÷ ")
+        .replace("\\pm", " ± ")
+        .replace("\\approx", " ≈ ")
+        .replace("\\neq", " ≠ ")
+        .replace("\\leq", " ≤ ")
+        .replace("\\geq", " ≥ ")
+        .replace("\\alpha", "α")
+        .replace("\\beta", "β")
+        .replace("\\theta", "θ")
+        .replace("\\pi", "π")
+        .replace("\\infty", "∞")
+        .replace("\\int", "∫")
+        .replace("\\sum", "∑")
+        .replace("\\cdot", " · ")
+        .replace("\\Delta", "Δ")
+        .replace("^2", "²")
+        .replace("^3", "³")
+        .replace("^{2}", "²")
+        .replace("^{3}", "³")
+        .replace("^{n}", "ⁿ")
+}
+
 @Composable
 fun parseInlineMarkdown(text: String, defaultColor: Color) = buildAnnotatedString {
-    var cursor = 0
     val boldRegex = Regex("\\*\\*(.*?)\\*\\*")
     val codeRegex = Regex("`(.*?)`")
-    
-    // Simple parser for bold and inline code
+    val inlineMathRegex = Regex("\\$(.*?)\\$")
+
     var remaining = text
     while (remaining.isNotEmpty()) {
         val boldMatch = boldRegex.find(remaining)
         val codeMatch = codeRegex.find(remaining)
+        val mathMatch = inlineMathRegex.find(remaining)
 
-        val nextMatch = listOfNotNull(boldMatch, codeMatch).minByOrNull { it.range.first }
+        val nextMatch = listOfNotNull(boldMatch, codeMatch, mathMatch).minByOrNull { it.range.first }
 
         if (nextMatch == null) {
             append(remaining)
@@ -284,7 +409,19 @@ fun parseInlineMarkdown(text: String, defaultColor: Color) = buildAnnotatedStrin
                     color = MaterialTheme.colorScheme.primary
                 )
             ) {
-                append(" ${codeMatch!!.groupValues[1]} ")
+                append(" ${codeMatch.groupValues[1]} ")
+            }
+        } else if (nextMatch == mathMatch) {
+            val formula = formatMathSymbols(mathMatch.groupValues[1])
+            withStyle(
+                SpanStyle(
+                    fontFamily = FontFamily.Monospace,
+                    background = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                append(" $formula ")
             }
         }
 
