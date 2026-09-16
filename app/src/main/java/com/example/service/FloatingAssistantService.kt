@@ -932,52 +932,11 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     // ==========================================
 
     /**
-     * Reads screen text directly using Accessibility Service.
-     * ZERO "Start recording or casting with OmniAI?" system dialogs.
+     * Reads screen text directly using fast on-device screen capture and OCR text extraction.
+     * 100% Safe, zero risky accessibility permissions required.
      */
     fun startInstantTextScan() {
-        if (!ScreenReaderAccessibilityService.isServiceEnabled(this)) {
-            Toast.makeText(
-                this,
-                "⚡ Turn ON 'OmniAI Instant Screen Reader' in Accessibility Settings to read screen text without recording popups!",
-                Toast.LENGTH_LONG
-            ).show()
-            ScreenReaderAccessibilityService.openAccessibilitySettings(this)
-            return
-        }
-
-        val a11y = ScreenReaderAccessibilityService.instance
-        if (a11y == null) {
-            Toast.makeText(this, "Screen Reader starting, please tap again in a moment.", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        hidePopup()
-        hideBubble()
-        hideOcrGrabber()
-        hideQuickHud()
-
-        serviceScope.launch {
-            // Brief delay allowing background app window to gain active focus
-            kotlinx.coroutines.delay(250)
-            val extractedText = a11y.captureActiveScreenText()
-            showPopup()
-
-            if (!extractedText.isNullOrBlank()) {
-                _statusText.value = "Instant Screen Text captured! Analyzing with AI..."
-                sendMessage(
-                    text = "Explain, summarize, or solve the following screen text accurately:\n\n$extractedText",
-                    imageBitmap = null,
-                    isScan = true
-                )
-            } else {
-                Toast.makeText(
-                    this@FloatingAssistantService,
-                    "No digital text found on screen. Use 'Crop Area' or 'Photo Scan' for visual images.",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-        }
+        startOcrTextExtraction(cropRect = null)
     }
 
     fun startScreenScan(cropRect: Rect?) {

@@ -33,7 +33,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.alpha
-import com.example.service.ScreenReaderAccessibilityService
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddPhotoAlternate
@@ -121,7 +120,6 @@ fun ScreenAssistantHubScreen(
     val context = LocalContext.current
     var hasOverlayPermission by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
     var isServiceRunning by remember { mutableStateOf(FloatingAssistantService.isRunning()) }
-    var isA11yEnabled by remember { mutableStateOf(ScreenReaderAccessibilityService.isServiceEnabled(context)) }
     val adminSettings by viewModel.adminSettings.collectAsState()
 
     var customTextDraft by remember(adminSettings.bubbleText) {
@@ -136,11 +134,10 @@ fun ScreenAssistantHubScreen(
         }
     }
 
-    // Re-check overlay and accessibility permission when screen resumes
+    // Re-check overlay permission when screen resumes
     LaunchedEffect(Unit) {
         hasOverlayPermission = Settings.canDrawOverlays(context)
         isServiceRunning = FloatingAssistantService.isRunning()
-        isA11yEnabled = ScreenReaderAccessibilityService.isServiceEnabled(context)
     }
 
     Scaffold(
@@ -299,18 +296,18 @@ fun ScreenAssistantHubScreen(
             }
 
             // ==========================================
-            // INSTANT SCREEN READER (ACCESSIBILITY SERVICE - NO POPUP)
+            // PLAY PROTECT SAFE: INSTANT SCREEN AI & OCR
             // ==========================================
             Surface(
                 shape = RoundedCornerShape(24.dp),
-                color = if (isA11yEnabled) MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceVariant,
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                 border = androidx.compose.foundation.BorderStroke(
                     1.dp,
-                    if (isA11yEnabled) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag("a11y_instant_screen_reader_card")
+                    .testTag("safe_screen_ai_card")
             ) {
                 Column(
                     modifier = Modifier.padding(18.dp),
@@ -330,7 +327,7 @@ fun ScreenAssistantHubScreen(
                                 modifier = Modifier
                                     .size(42.dp)
                                     .background(
-                                        color = if (isA11yEnabled) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                        color = MaterialTheme.colorScheme.tertiaryContainer,
                                         shape = CircleShape
                                     ),
                                 contentAlignment = Alignment.Center
@@ -338,20 +335,20 @@ fun ScreenAssistantHubScreen(
                                 Icon(
                                     imageVector = Icons.Default.Bolt,
                                     contentDescription = null,
-                                    tint = if (isA11yEnabled) MaterialTheme.colorScheme.onTertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
                                     modifier = Modifier.size(24.dp)
                                 )
                             }
 
                             Column {
                                 Text(
-                                    text = "Instant Screen Reader",
+                                    text = "Instant Screen AI & OCR Grabber",
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                                 )
                                 Text(
-                                    text = if (isA11yEnabled) "Active • Zero popups (0.1s)" else "Disabled (Tap to enable)",
+                                    text = "Play Protect Safe • Fast On-Device ML",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = if (isA11yEnabled) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = MaterialTheme.colorScheme.tertiary
                                 )
                             }
                         }
@@ -359,11 +356,11 @@ fun ScreenAssistantHubScreen(
                         // Badge / Status
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = if (isA11yEnabled) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = if (isA11yEnabled) MaterialTheme.colorScheme.onTertiary else MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
                         ) {
                             Text(
-                                text = if (isA11yEnabled) "ACTIVE" else "OFF",
+                                text = "100% SAFE",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -372,7 +369,7 @@ fun ScreenAssistantHubScreen(
                     }
 
                     Text(
-                        text = "⚡ बिना किसी 'Start recording or casting' पॉपअप के स्क्रीन के टेक्स्ट, चैट, आर्टिकल्स और सवालों को सीधे 0.1 सेकंड में पढ़ें।",
+                        text = "🔒 Google Play Protect सुरक्षित: ऐप में किसी भी जोखिम भरी Accessibility परमिशन के बिना सुरक्षित ऑन-डिवाइस स्क्रीन कैप्चर और AI OCR तकनीक का इस्तेमाल होता है।",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -391,11 +388,15 @@ fun ScreenAssistantHubScreen(
                                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                             )
                             Text(
-                                text = "• ⚡ Instant Text: बिना परमिशन डायलॉग के टेक्स्ट स्कैन।",
+                                text = "• ⚡ Full Screen Scan: पूरी स्क्रीन का AI विश्लेषण और सवाल हल।",
                                 style = MaterialTheme.typography.bodySmall
                             )
                             Text(
                                 text = "• ✂️ Crop Area: मनपसंद हिस्सा क्रॉप करें — क्रॉप इमेज चैट में दिखेगी!",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                text = "• 📋 OCR Text Grabber: स्क्रीन के किसी भी हिस्से से टेक्स्ट कॉपी और ट्रांसलेट करें।",
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
@@ -405,28 +406,28 @@ fun ScreenAssistantHubScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        Button(
-                            onClick = {
-                                ScreenReaderAccessibilityService.openAccessibilitySettings(context)
-                            },
+                        Surface(
                             shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isA11yEnabled) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primary,
-                                contentColor = if (isA11yEnabled) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onPrimary
-                            ),
-                            modifier = Modifier.testTag("open_a11y_settings_button")
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
                         ) {
-                            Icon(
-                                imageVector = if (isA11yEnabled) Icons.Default.CheckCircle else Icons.Default.Tune,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (isA11yEnabled) "Accessibility Settings (Active)" else "Enable in Settings",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Ready to Use with Floating Bubble",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
                     }
                 }
