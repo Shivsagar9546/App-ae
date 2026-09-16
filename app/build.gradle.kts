@@ -61,6 +61,9 @@ android {
     includeInApk = false
     includeInBundle = true
   }
+  lint {
+    disable.add("InvalidFragmentVersionForActivityResult")
+  }
 }
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
@@ -98,6 +101,7 @@ dependencies {
   implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
+  implementation(libs.androidx.browser)
   implementation(libs.coil.compose)
   implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)

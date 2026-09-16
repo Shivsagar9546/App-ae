@@ -3,6 +3,8 @@ package com.example.service
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -14,6 +16,7 @@ import java.util.Locale
 class VoiceRecognitionHelper(private val context: Context) {
 
     private var speechRecognizer: SpeechRecognizer? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private val _isListening = MutableStateFlow(false)
     val isListening: StateFlow<Boolean> = _isListening
@@ -28,6 +31,11 @@ class VoiceRecognitionHelper(private val context: Context) {
         languageCode: String = "en-US",
         onResult: (String) -> Unit
     ) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { startListening(languageCode, onResult) }
+            return
+        }
+
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             _errorMessage.value = "Speech recognition is not available on this device."
             return
@@ -105,6 +113,11 @@ class VoiceRecognitionHelper(private val context: Context) {
     }
 
     fun stopListening() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { stopListening() }
+            return
+        }
+
         try {
             speechRecognizer?.stopListening()
             speechRecognizer?.destroy()

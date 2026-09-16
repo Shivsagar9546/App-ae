@@ -32,6 +32,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.alpha
+import com.example.service.ScreenReaderAccessibilityService
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddPhotoAlternate
@@ -119,6 +121,7 @@ fun ScreenAssistantHubScreen(
     val context = LocalContext.current
     var hasOverlayPermission by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
     var isServiceRunning by remember { mutableStateOf(FloatingAssistantService.isRunning()) }
+    var isA11yEnabled by remember { mutableStateOf(ScreenReaderAccessibilityService.isServiceEnabled(context)) }
     val adminSettings by viewModel.adminSettings.collectAsState()
 
     var customTextDraft by remember(adminSettings.bubbleText) {
@@ -133,10 +136,11 @@ fun ScreenAssistantHubScreen(
         }
     }
 
-    // Re-check overlay permission when screen resumes
+    // Re-check overlay and accessibility permission when screen resumes
     LaunchedEffect(Unit) {
         hasOverlayPermission = Settings.canDrawOverlays(context)
         isServiceRunning = FloatingAssistantService.isRunning()
+        isA11yEnabled = ScreenReaderAccessibilityService.isServiceEnabled(context)
     }
 
     Scaffold(
@@ -295,6 +299,140 @@ fun ScreenAssistantHubScreen(
             }
 
             // ==========================================
+            // INSTANT SCREEN READER (ACCESSIBILITY SERVICE - NO POPUP)
+            // ==========================================
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = if (isA11yEnabled) MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceVariant,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (isA11yEnabled) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("a11y_instant_screen_reader_card")
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .background(
+                                        color = if (isA11yEnabled) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Bolt,
+                                    contentDescription = null,
+                                    tint = if (isA11yEnabled) MaterialTheme.colorScheme.onTertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+
+                            Column {
+                                Text(
+                                    text = "Instant Screen Reader",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                                )
+                                Text(
+                                    text = if (isA11yEnabled) "Active • Zero popups (0.1s)" else "Disabled (Tap to enable)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isA11yEnabled) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        // Badge / Status
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isA11yEnabled) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = if (isA11yEnabled) MaterialTheme.colorScheme.onTertiary else MaterialTheme.colorScheme.onSurfaceVariant
+                        ) {
+                            Text(
+                                text = if (isA11yEnabled) "ACTIVE" else "OFF",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "⚡ बिना किसी 'Start recording or casting' पॉपअप के स्क्रीन के टेक्स्ट, चैट, आर्टिकल्स और सवालों को सीधे 0.1 सेकंड में पढ़ें।",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "💡 सुविधा की जानकारी (Features Guide):",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                            Text(
+                                text = "• ⚡ Instant Text: बिना परमिशन डायलॉग के टेक्स्ट स्कैन।",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                text = "• ✂️ Crop Area: मनपसंद हिस्सा क्रॉप करें — क्रॉप इमेज चैट में दिखेगी!",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Button(
+                            onClick = {
+                                ScreenReaderAccessibilityService.openAccessibilitySettings(context)
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isA11yEnabled) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primary,
+                                contentColor = if (isA11yEnabled) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onPrimary
+                            ),
+                            modifier = Modifier.testTag("open_a11y_settings_button")
+                        ) {
+                            Icon(
+                                imageVector = if (isA11yEnabled) Icons.Default.CheckCircle else Icons.Default.Tune,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isA11yEnabled) "Accessibility Settings (Active)" else "Enable in Settings",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ==========================================
             // FLOATING ICON & AVATAR CUSTOMIZATION (USER REQUEST)
             // ==========================================
             Surface(
@@ -359,11 +497,13 @@ fun ScreenAssistantHubScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                val previewAlpha = adminSettings.bubbleAlpha.coerceIn(0.15f, 1.0f)
+                                val previewAlphaPct = (previewAlpha * 100).toInt()
                                 Text(
-                                    text = "📱 LIVE SCREEN PREVIEW",
+                                    text = "📱 LIVE PREVIEW • $previewAlphaPct% OPACITY",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = Color.White.copy(alpha = 0.6f),
+                                    color = Color.White.copy(alpha = 0.85f),
                                     letterSpacing = 1.sp
                                 )
 
@@ -389,67 +529,16 @@ fun ScreenAssistantHubScreen(
                                     else -> Icons.Default.AutoAwesome
                                 }
 
-                                if (adminSettings.bubbleStyle == "circle") {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(50.dp)
-                                            .background(Brush.linearGradient(gradientColors), CircleShape)
-                                            .border(2.dp, Color.White.copy(alpha = 0.8f), CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (hasCustomPhoto) {
-                                            AsyncImage(
-                                                model = ImageRequest.Builder(context)
-                                                    .data(File(adminSettings.bubbleCustomImagePath))
-                                                    .crossfade(true)
-                                                    .build(),
-                                                contentDescription = "Preview",
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .clip(CircleShape)
-                                            )
-                                        } else {
-                                            Icon(imageVector = iconVec, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
-                                        }
-                                    }
-                                } else if (adminSettings.bubbleStyle == "icon_only" || adminSettings.bubbleStyle == "square") {
-                                    val sqShape = RoundedCornerShape(14.dp)
-                                    Box(
-                                        modifier = Modifier
-                                            .size(50.dp)
-                                            .background(Brush.linearGradient(gradientColors), sqShape)
-                                            .border(1.5.dp, Color.White.copy(alpha = 0.7f), sqShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (hasCustomPhoto) {
-                                            AsyncImage(
-                                                model = ImageRequest.Builder(context)
-                                                    .data(File(adminSettings.bubbleCustomImagePath))
-                                                    .crossfade(true)
-                                                    .build(),
-                                                contentDescription = "Preview",
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .clip(sqShape)
-                                            )
-                                        } else {
-                                            Icon(imageVector = iconVec, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
-                                        }
-                                    }
-                                } else {
-                                    val pillShape = RoundedCornerShape(26.dp)
-                                    Box(
-                                        modifier = Modifier
-                                            .background(Brush.linearGradient(gradientColors), pillShape)
-                                            .border(1.5.dp, Color.White.copy(alpha = 0.6f), pillShape)
-                                            .padding(horizontal = 16.dp, vertical = 9.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                Box(
+                                    modifier = Modifier.alpha(previewAlpha)
+                                ) {
+                                    if (adminSettings.bubbleStyle == "circle") {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(50.dp)
+                                                .background(Brush.linearGradient(gradientColors), CircleShape)
+                                                .border(2.dp, Color.White.copy(alpha = 0.8f), CircleShape),
+                                            contentAlignment = Alignment.Center
                                         ) {
                                             if (hasCustomPhoto) {
                                                 AsyncImage(
@@ -460,20 +549,75 @@ fun ScreenAssistantHubScreen(
                                                     contentDescription = "Preview",
                                                     contentScale = ContentScale.Crop,
                                                     modifier = Modifier
-                                                        .size(22.dp)
+                                                        .fillMaxSize()
                                                         .clip(CircleShape)
-                                                        .border(1.dp, Color.White, CircleShape)
                                                 )
                                             } else {
-                                                Icon(imageVector = iconVec, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                                Icon(imageVector = iconVec, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
                                             }
+                                        }
+                                    } else if (adminSettings.bubbleStyle == "icon_only" || adminSettings.bubbleStyle == "square") {
+                                        val sqShape = RoundedCornerShape(14.dp)
+                                        Box(
+                                            modifier = Modifier
+                                                .size(50.dp)
+                                                .background(Brush.linearGradient(gradientColors), sqShape)
+                                                .border(1.5.dp, Color.White.copy(alpha = 0.7f), sqShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (hasCustomPhoto) {
+                                                AsyncImage(
+                                                    model = ImageRequest.Builder(context)
+                                                        .data(File(adminSettings.bubbleCustomImagePath))
+                                                        .crossfade(true)
+                                                        .build(),
+                                                    contentDescription = "Preview",
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .clip(sqShape)
+                                                )
+                                            } else {
+                                                Icon(imageVector = iconVec, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
+                                            }
+                                        }
+                                    } else {
+                                        val pillShape = RoundedCornerShape(26.dp)
+                                        Box(
+                                            modifier = Modifier
+                                                .background(Brush.linearGradient(gradientColors), pillShape)
+                                                .border(1.5.dp, Color.White.copy(alpha = 0.6f), pillShape)
+                                                .padding(horizontal = 16.dp, vertical = 9.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                if (hasCustomPhoto) {
+                                                    AsyncImage(
+                                                        model = ImageRequest.Builder(context)
+                                                            .data(File(adminSettings.bubbleCustomImagePath))
+                                                            .crossfade(true)
+                                                            .build(),
+                                                        contentDescription = "Preview",
+                                                        contentScale = ContentScale.Crop,
+                                                        modifier = Modifier
+                                                            .size(22.dp)
+                                                            .clip(CircleShape)
+                                                            .border(1.dp, Color.White, CircleShape)
+                                                    )
+                                                } else {
+                                                    Icon(imageVector = iconVec, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                                }
 
-                                            Text(
-                                                text = if (adminSettings.bubbleText.isNotBlank()) adminSettings.bubbleText else "AI ✨",
-                                                color = Color.White,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
+                                                Text(
+                                                    text = if (adminSettings.bubbleText.isNotBlank()) adminSettings.bubbleText else "AI ✨",
+                                                    color = Color.White,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -693,6 +837,62 @@ fun ScreenAssistantHubScreen(
                             label = { Text("Large") },
                             modifier = Modifier.weight(1f)
                         )
+                    }
+
+                    // 7. Bubble Transparency / Opacity (पारदर्शिता)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "7. Bubble Transparency & Opacity",
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        val alphaPct = (adminSettings.bubbleAlpha.coerceIn(0.15f, 1.0f) * 100).toInt()
+                        Text(
+                            text = "$alphaPct% ${if (alphaPct <= 30) "👻 Transparent" else if (alphaPct <= 70) "🌤️ Semi-Clear" else "🛡️ Solid"}",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    Text(
+                        text = "बबल को ट्रांसपेरेंट (पारदर्शी) बनाएं ताकि बैकग्राउंड ऐप्स, आर्टिकल्स या वीडियो देखने में रुकावट न हो।",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Slider(
+                        value = adminSettings.bubbleAlpha.coerceIn(0.15f, 1.0f),
+                        onValueChange = { newAlpha ->
+                            viewModel.updateAdminSettings(bubbleAlpha = newAlpha)
+                        },
+                        valueRange = 0.15f..1.0f,
+                        steps = 16,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // Quick Preset Chips
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(
+                            Triple(0.25f, "25%", "Ghost"),
+                            Triple(0.50f, "50%", "Semi"),
+                            Triple(0.75f, "75%", "Subtle"),
+                            Triple(1.00f, "100%", "Solid")
+                        ).forEach { (alphaVal, pctLabel, name) ->
+                            val isSelected = Math.abs(adminSettings.bubbleAlpha - alphaVal) < 0.08f
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { viewModel.updateAdminSettings(bubbleAlpha = alphaVal) },
+                                label = { Text("$pctLabel $name", fontSize = 11.sp) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
             }

@@ -26,7 +26,7 @@ object TtsManager {
         textToSpeech = TextToSpeech(context.applicationContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 isInitialized = true
-                val result = textToSpeech?.setLanguage(Locale("hi", "IN"))
+                val result = textToSpeech?.setLanguage(Locale.forLanguageTag("hi-IN"))
                 if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
                     textToSpeech?.language = Locale.ENGLISH
                 }

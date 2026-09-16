@@ -12,12 +12,17 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.changedToUp
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -31,6 +36,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CropFree
 import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.RadioButtonChecked
@@ -40,6 +46,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Whatshot
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -80,7 +87,11 @@ fun FloatingBubbleView(
     gradientPreset: String = "purple",
     bubbleSize: String = "medium",
     bubbleAlpha: Float = 1.0f,
+    onUpdateAlpha: ((Float) -> Unit)? = null,
+    onDrag: (dx: Float, dy: Float) -> Unit = { _, _ -> },
+    onDragEnd: () -> Unit = {},
     onBubbleClick: () -> Unit,
+    onInstantTextScan: () -> Unit = {},
     onScanScreen: () -> Unit,
     onAreaScan: () -> Unit,
     onOcrGrabber: () -> Unit,
@@ -149,9 +160,7 @@ fun FloatingBubbleView(
     Column(
         horizontalAlignment = Alignment.End,
         verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier
-            .padding(8.dp)
-            .alpha(bubbleAlpha.coerceIn(0.4f, 1.0f))
+        modifier = Modifier.padding(8.dp)
     ) {
         // Quick Actions Menu on Long Press
         AnimatedVisibility(
@@ -161,12 +170,12 @@ fun FloatingBubbleView(
         ) {
             Surface(
                 shape = RoundedCornerShape(18.dp),
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
                 tonalElevation = 6.dp,
                 shadowElevation = 12.dp,
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
                 modifier = Modifier
-                    .width(190.dp)
+                    .width(200.dp)
                     .testTag("floating_bubble_menu")
             ) {
                 Column(
@@ -182,11 +191,19 @@ fun FloatingBubbleView(
                         }
                     )
                     BubbleMenuItem(
-                        icon = Icons.Default.Screenshot,
-                        label = "Scan Screen",
+                        icon = Icons.Default.Bolt,
+                        label = "⚡ Instant Text (No Popup)",
                         onClick = {
                             showMenu = false
-                            onScanScreen()
+                            onInstantTextScan()
+                        }
+                    )
+                    BubbleMenuItem(
+                        icon = Icons.Default.CropFree,
+                        label = "Crop Area",
+                        onClick = {
+                            showMenu = false
+                            onAreaScan()
                         }
                     )
                     BubbleMenuItem(
@@ -206,14 +223,6 @@ fun FloatingBubbleView(
                         }
                     )
                     BubbleMenuItem(
-                        icon = Icons.Default.CropFree,
-                        label = "Crop Area",
-                        onClick = {
-                            showMenu = false
-                            onAreaScan()
-                        }
-                    )
-                    BubbleMenuItem(
                         icon = Icons.Default.Mic,
                         label = "Voice Prompt",
                         onClick = {
@@ -221,6 +230,70 @@ fun FloatingBubbleView(
                             onVoiceClick()
                         }
                     )
+
+                    // Quick Bubble Opacity / Transparency Row
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        val currentPct = (bubbleAlpha * 100).toInt()
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Opacity,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(13.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Text("Transparency", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                            Text("$currentPct%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            listOf(
+                                0.25f to "25%",
+                                0.50f to "50%",
+                                0.75f to "75%",
+                                1.0f to "100%"
+                            ).forEach { (alphaVal, label) ->
+                                val isSelected = Math.abs(bubbleAlpha - alphaVal) < 0.12f
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(
+                                            if (isSelected) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.surfaceVariant
+                                        )
+                                        .clickable { onUpdateAlpha?.invoke(alphaVal) }
+                                        .padding(vertical = 3.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = label,
+                                        fontSize = 10.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
                     BubbleMenuItem(
                         icon = Icons.Default.Settings,
                         label = "Settings & Custom Icon",
@@ -242,9 +315,63 @@ fun FloatingBubbleView(
             }
         }
 
+        // Common Gesture Modifier for smooth dragging across screen, short tap to open window, and long press for menu
+        val bubbleGestureModifier = Modifier
+            .testTag("floating_ai_bubble")
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val startTime = System.currentTimeMillis()
+                    var totalDragDistance = 0f
+                    val touchSlop = viewConfiguration.touchSlop
+                    var isDrag = false
+
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull()
+                        if (change == null) {
+                            if (isDrag) onDragEnd()
+                            break
+                        }
+
+                        if (change.changedToUp()) {
+                            change.consume()
+                            if (isDrag) {
+                                onDragEnd()
+                            } else {
+                                val duration = System.currentTimeMillis() - startTime
+                                if (duration > 400) {
+                                    showMenu = !showMenu
+                                } else {
+                                    if (showMenu) showMenu = false else onBubbleClick()
+                                }
+                            }
+                            break
+                        }
+
+                        val dragX = change.position.x - change.previousPosition.x
+                        val dragY = change.position.y - change.previousPosition.y
+                        val dist = Math.hypot(dragX.toDouble(), dragY.toDouble()).toFloat()
+                        totalDragDistance += dist
+
+                        if (!isDrag && totalDragDistance > touchSlop) {
+                            isDrag = true
+                        }
+
+                        if (isDrag) {
+                            change.consume()
+                            onDrag(dragX, dragY)
+                        }
+                    }
+                }
+            }
+
         // Main Draggable Custom Bubble
-        when {
-            // Circle Avatar Style (with custom photo or icon)
+        Box(
+            modifier = Modifier.alpha(bubbleAlpha.coerceIn(0.15f, 1.0f))
+        ) {
+            when {
+                // Circle Avatar Style (with custom photo or icon)
             bubbleStyle == "circle" -> {
                 Surface(
                     shape = CircleShape,
@@ -253,15 +380,7 @@ fun FloatingBubbleView(
                         .size(circleSize)
                         .shadow(12.dp, CircleShape)
                         .clip(CircleShape)
-                        .combinedClickable(
-                            onClick = {
-                                if (showMenu) showMenu = false else onBubbleClick()
-                            },
-                            onLongClick = {
-                                showMenu = !showMenu
-                            }
-                        )
-                        .testTag("floating_ai_bubble")
+                        .then(bubbleGestureModifier)
                 ) {
                     Box(
                         modifier = Modifier
@@ -304,15 +423,7 @@ fun FloatingBubbleView(
                         .size(circleSize)
                         .shadow(12.dp, shape)
                         .clip(shape)
-                        .combinedClickable(
-                            onClick = {
-                                if (showMenu) showMenu = false else onBubbleClick()
-                            },
-                            onLongClick = {
-                                showMenu = !showMenu
-                            }
-                        )
-                        .testTag("floating_ai_bubble")
+                        .then(bubbleGestureModifier)
                 ) {
                     Box(
                         modifier = Modifier
@@ -354,15 +465,7 @@ fun FloatingBubbleView(
                     modifier = Modifier
                         .shadow(12.dp, shape)
                         .clip(shape)
-                        .combinedClickable(
-                            onClick = {
-                                if (showMenu) showMenu = false else onBubbleClick()
-                            },
-                            onLongClick = {
-                                showMenu = !showMenu
-                            }
-                        )
-                        .testTag("floating_ai_bubble")
+                        .then(bubbleGestureModifier)
                 ) {
                     Box(
                         modifier = Modifier
@@ -410,6 +513,7 @@ fun FloatingBubbleView(
             }
         }
     }
+}
 }
 
 private fun Modifier.fillMaxDimensions(): Modifier = this.then(

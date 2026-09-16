@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PictureAsPdf
@@ -44,8 +43,7 @@ fun AttachmentBottomSheet(
     onCameraClick: () -> Unit,
     onGalleryClick: () -> Unit,
     onPdfClick: () -> Unit,
-    onScreenScanClick: () -> Unit,
-    onCalculatorClick: () -> Unit
+    onScreenScanClick: () -> Unit = {}
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -68,10 +66,10 @@ fun AttachmentBottomSheet(
                 modifier = Modifier.padding(bottom = 18.dp)
             )
 
-            // Grid of 5 stylish ChatGPT-like items
+            // Grid of items
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceAround
+                horizontalArrangement = Arrangement.SpaceEvenly
             ) {
                 AttachmentItem(
                     title = "Camera",
@@ -85,7 +83,7 @@ fun AttachmentBottomSheet(
                 )
 
                 AttachmentItem(
-                    title = "Photos",
+                    title = "Photos (Max 10)",
                     icon = Icons.Default.Image,
                     backgroundColor = Color(0xFF8B5CF6),
                     testTag = "attach_item_gallery",
@@ -104,37 +102,6 @@ fun AttachmentBottomSheet(
                         onDismiss()
                         onPdfClick()
                     }
-                )
-
-                AttachmentItem(
-                    title = "Scan Screen",
-                    icon = Icons.Default.Screenshot,
-                    backgroundColor = Color(0xFF06B6D4),
-                    testTag = "attach_item_screen",
-                    onClick = {
-                        onDismiss()
-                        onScreenScanClick()
-                    }
-                )
-            }
-
-            Spacer(modifier = Modifier.height(18.dp))
-
-            // Second row for calculator & tools
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Start
-            ) {
-                AttachmentItem(
-                    title = "Calculator",
-                    icon = Icons.Default.Calculate,
-                    backgroundColor = Color(0xFF10B981),
-                    testTag = "attach_item_calc",
-                    onClick = {
-                        onDismiss()
-                        onCalculatorClick()
-                    },
-                    modifier = Modifier.padding(start = 12.dp)
                 )
             }
 

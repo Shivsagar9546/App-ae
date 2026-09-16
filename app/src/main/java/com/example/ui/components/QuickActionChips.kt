@@ -9,12 +9,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Lightbulb
-import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -36,11 +36,11 @@ data class QuickActionItem(
 val defaultQuickActions = listOf(
     QuickActionItem("Get Answer", "Solve and provide the direct answer to this screen.", Icons.Default.AutoAwesome),
     QuickActionItem("Explain", "Explain what is shown on this screen in simple terms.", Icons.Default.Lightbulb),
-    QuickActionItem("Solve Step-by-Step", "Solve this step-by-step with clear logic.", Icons.Default.Calculate),
+    QuickActionItem("Solve Step-by-Step", "Solve this step-by-step with clear logic.", Icons.Default.Psychology),
     QuickActionItem("Translate", "Translate the text visible in this screen to Hindi & English.", Icons.Default.Translate),
     QuickActionItem("Summarize", "Summarize the key points visible on this screen.", Icons.Default.Description),
-    QuickActionItem("Extract Text", "Extract and transcribe all text from this screen clearly.", Icons.Default.MenuBook),
-    QuickActionItem("What should I do?", "What action should I take next based on what's visible on this screen?", Icons.Default.HelpOutline)
+    QuickActionItem("Extract Text", "Extract and transcribe all text from this screen clearly.", Icons.AutoMirrored.Filled.MenuBook),
+    QuickActionItem("What should I do?", "What action should I take next based on what's visible on this screen?", Icons.AutoMirrored.Filled.HelpOutline)
 )
 
 @Composable

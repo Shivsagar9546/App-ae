@@ -2,9 +2,12 @@ package com.example.ui.screens
 
 import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,21 +22,39 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CropFree
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.OpenInFull
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Screenshot
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -48,6 +69,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,7 +83,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -80,11 +104,17 @@ fun FloatingPopUpView(
     isGenerating: Boolean,
     statusText: String?,
     onSendMessage: (String, Bitmap?) -> Unit,
-    onScanScreen: () -> Unit,
+    onInstantTextScan: () -> Unit = {},
+    onScanScreen: () -> Unit = {},
     onAreaScan: () -> Unit,
     onOcrGrabber: () -> Unit = {},
     onQuickHud: () -> Unit = {},
+    onPickGalleryImage: ((Bitmap) -> Unit) -> Unit = {},
+    onTakePhoto: ((Bitmap) -> Unit) -> Unit = {},
     onVoiceInput: () -> Unit,
+    onSpeakText: (String) -> Unit = {},
+    onClearMessages: () -> Unit = {},
+    onRegenerate: () -> Unit = {},
     onMinimize: () -> Unit,
     onMaximize: () -> Unit,
     onClose: () -> Unit,
@@ -93,7 +123,11 @@ fun FloatingPopUpView(
 ) {
     var inputText by remember { mutableStateOf("") }
     var currentTab by remember { mutableIntStateOf(0) } // 0: AI Tools, 1: Gemini Direct Web
+    var attachedBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var currentlySpeakingText by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -183,11 +217,28 @@ fun FloatingPopUpView(
                         )
                     }
 
-                    // Window Control Actions: Minimize | Maximize | Close
+                    // Window Control Actions: Clear Chat | Minimize | Maximize | Close
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Clear Chat History
+                        if (messages.isNotEmpty()) {
+                            IconButton(
+                                onClick = onClearMessages,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .testTag("popup_clear_chat_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DeleteSweep,
+                                    contentDescription = "Clear Chat",
+                                    modifier = Modifier.size(17.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
                         // Minimize to Bubble
                         IconButton(
                             onClick = onMinimize,
@@ -338,29 +389,85 @@ fun FloatingPopUpView(
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "Tap Scan Screen to analyze what's visible on other apps, or type your question below.",
+                                    text = "Crop any screen area, extract text instantly, or ask questions below.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                 )
                                 Spacer(modifier = Modifier.height(14.dp))
 
-                                // Large Scan Screen Action Button
-                                Button(
-                                    onClick = onScanScreen,
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary
-                                    ),
-                                    modifier = Modifier.testTag("popup_initial_scan_button")
+                                // Initial Action Buttons: Instant Text, Crop Area, Upload Photo
+                                Column(
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.padding(horizontal = 8.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Screenshot,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Scan Current Screen", fontWeight = FontWeight.SemiBold)
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Button(
+                                            onClick = onInstantTextScan,
+                                            shape = RoundedCornerShape(16.dp),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.primary
+                                            ),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("popup_initial_instant_text_button")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Bolt,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(5.dp))
+                                            Text("⚡ Instant Text", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+
+                                        Button(
+                                            onClick = onAreaScan,
+                                            shape = RoundedCornerShape(16.dp),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                            ),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("popup_initial_crop_button")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.CropFree,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(5.dp))
+                                            Text("✂️ Crop Area", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+
+                                    Button(
+                                        onClick = {
+                                            onPickGalleryImage { bmp ->
+                                                attachedBitmap = bmp
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("popup_initial_image_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.PhotoLibrary,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("🖼️ Upload Image from Gallery", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    }
                                 }
                             }
                         } else {
@@ -370,8 +477,41 @@ fun FloatingPopUpView(
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                 contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 10.dp)
                             ) {
-                                items(messages) { msg ->
-                                    FloatingMessageBubble(msg)
+                                items(messages, key = { it.id }) { msg ->
+                                    FloatingMessageBubble(
+                                        msg = msg,
+                                        isSpeaking = (currentlySpeakingText == msg.text),
+                                        onSpeak = { text ->
+                                            if (currentlySpeakingText == text) {
+                                                currentlySpeakingText = null
+                                                onSpeakText("")
+                                            } else {
+                                                currentlySpeakingText = text
+                                                onSpeakText(text)
+                                            }
+                                        },
+                                        onCopy = { text ->
+                                            clipboardManager.setText(AnnotatedString(text))
+                                            Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                                        },
+                                        onShare = { text ->
+                                            try {
+                                                val sendIntent = Intent().apply {
+                                                    action = Intent.ACTION_SEND
+                                                    putExtra(Intent.EXTRA_TEXT, text)
+                                                    type = "text/plain"
+                                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                                }
+                                                val shareIntent = Intent.createChooser(sendIntent, "Share AI Response").apply {
+                                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                                }
+                                                context.startActivity(shareIntent)
+                                            } catch (e: Exception) {
+                                                Toast.makeText(context, "Unable to share", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        onRegenerate = onRegenerate
+                                    )
                                 }
 
                                 if (isGenerating) {
@@ -394,6 +534,78 @@ fun FloatingPopUpView(
                         )
                     }
 
+                    // Attached Image Preview Bar (if user picked an image)
+                    AnimatedVisibility(visible = attachedBitmap != null) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
+                            shape = RoundedCornerShape(14.dp),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    attachedBitmap?.let { bmp ->
+                                        Image(
+                                            bitmap = bmp.asImageBitmap(),
+                                            contentDescription = "Attached image preview",
+                                            modifier = Modifier
+                                                .size(42.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .border(
+                                                    1.dp,
+                                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                                                    RoundedCornerShape(8.dp)
+                                                ),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    }
+                                    Column {
+                                        Text(
+                                            text = "Image Selected",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = "Type question or hit send to analyze",
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                        )
+                                    }
+                                }
+
+                                IconButton(
+                                    onClick = { attachedBitmap = null },
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .background(
+                                            MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                                            CircleShape
+                                        )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Remove attached photo",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     // Bottom Floating Control Bar
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
@@ -403,117 +615,121 @@ fun FloatingPopUpView(
                         Column(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
                         ) {
-                            // Quick scan tools bar
+                            // Quick scan & vision tools scrollable bar
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState())
                                     .padding(bottom = 6.dp),
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // Scan Screen
+                                // 0. Instant Screen Text
                                 Button(
-                                    onClick = onScanScreen,
+                                    onClick = onInstantTextScan,
                                     shape = RoundedCornerShape(10.dp),
-                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
                                     ),
                                     modifier = Modifier
-                                        .weight(1f)
                                         .height(32.dp)
-                                        .testTag("popup_scan_screen_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Screenshot,
-                                        contentDescription = "Scan Screen",
-                                        modifier = Modifier.size(13.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(3.dp))
-                                    Text("Scan", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
+                                        .testTag("popup_instant_text_button")
+                                 ) {
+                                     Icon(
+                                         imageVector = Icons.Default.Bolt,
+                                         contentDescription = "Instant Text",
+                                         modifier = Modifier.size(13.dp)
+                                     )
+                                     Spacer(modifier = Modifier.width(3.dp))
+                                     Text("⚡ Instant", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                 }
 
-                                // OCR Text Grabber
-                                Button(
-                                    onClick = onOcrGrabber,
-                                    shape = RoundedCornerShape(10.dp),
-                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                                    ),
-                                    modifier = Modifier
-                                        .weight(1.1f)
-                                        .height(32.dp)
-                                        .testTag("popup_ocr_grabber_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.TextFields,
-                                        contentDescription = "Text Grabber",
-                                        modifier = Modifier.size(13.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(3.dp))
-                                    Text("OCR Text", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-
-                                // Quick HUD Solution
-                                Button(
-                                    onClick = onQuickHud,
-                                    shape = RoundedCornerShape(10.dp),
-                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                    ),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(32.dp)
-                                        .testTag("popup_quick_hud_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.AutoAwesome,
-                                        contentDescription = "HUD",
-                                        modifier = Modifier.size(13.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(3.dp))
-                                    Text("HUD", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-
-                                // Scan Selected Area
+                                // 1. Crop Selected Area
                                 Button(
                                     onClick = onAreaScan,
                                     shape = RoundedCornerShape(10.dp),
-                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
                                         contentColor = MaterialTheme.colorScheme.onSecondaryContainer
                                     ),
                                     modifier = Modifier
-                                        .weight(1f)
                                         .height(32.dp)
                                         .testTag("popup_area_scan_button")
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.CropFree,
-                                        contentDescription = "Area Scan",
+                                        contentDescription = "Crop Area",
                                         modifier = Modifier.size(13.dp)
                                     )
                                     Spacer(modifier = Modifier.width(3.dp))
-                                    Text("Crop", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("✂️ Crop", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                // 2. Gallery Photo Upload
+                                Button(
+                                    onClick = {
+                                        onPickGalleryImage { bmp ->
+                                            attachedBitmap = bmp
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    ),
+                                    modifier = Modifier
+                                        .height(32.dp)
+                                        .testTag("popup_gallery_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PhotoLibrary,
+                                        contentDescription = "Gallery",
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("🖼️ Gallery", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
 
-                            // Input Field with Voice & Send Buttons
+                            // Input Field with Attach, Voice & Send Buttons
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
+                                // Direct Image Attachment (+) / Photo Button from Gallery
+                                IconButton(
+                                    onClick = {
+                                        onPickGalleryImage { bmp ->
+                                            attachedBitmap = bmp
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                                        .testTag("popup_attach_image_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AddPhotoAlternate,
+                                        contentDescription = "Upload Image from Gallery",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
                                 OutlinedTextField(
                                     value = inputText,
                                     onValueChange = { inputText = it },
-                                    placeholder = { Text("Ask about screen or type...", fontSize = 13.sp) },
+                                    placeholder = {
+                                        Text(
+                                            text = if (attachedBitmap != null) "Ask about this photo..." else "Ask about screen or type...",
+                                            fontSize = 13.sp
+                                        )
+                                    },
                                     modifier = Modifier
                                         .weight(1f)
                                         .testTag("popup_input_field"),
@@ -547,12 +763,14 @@ fun FloatingPopUpView(
                                 // Send Button
                                 FilledIconButton(
                                     onClick = {
-                                        if (inputText.isNotBlank()) {
-                                            onSendMessage(inputText.trim(), null)
+                                        val prompt = inputText.trim()
+                                        if (prompt.isNotBlank() || attachedBitmap != null) {
+                                            onSendMessage(prompt, attachedBitmap)
                                             inputText = ""
+                                            attachedBitmap = null
                                         }
                                     },
-                                    enabled = inputText.isNotBlank() && !isGenerating,
+                                    enabled = (inputText.isNotBlank() || attachedBitmap != null) && !isGenerating,
                                     modifier = Modifier
                                         .size(38.dp)
                                         .testTag("popup_send_button"),
@@ -561,7 +779,7 @@ fun FloatingPopUpView(
                                     )
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Send,
+                                        imageVector = Icons.AutoMirrored.Filled.Send,
                                         contentDescription = "Send",
                                         modifier = Modifier.size(18.dp)
                                     )
@@ -595,12 +813,20 @@ fun FloatingPopUpView(
                         )
                 )
             }
+
         }
     }
 }
 
 @Composable
-private fun FloatingMessageBubble(msg: ChatMessage) {
+private fun FloatingMessageBubble(
+    msg: ChatMessage,
+    isSpeaking: Boolean,
+    onSpeak: (String) -> Unit,
+    onCopy: (String) -> Unit,
+    onShare: (String) -> Unit,
+    onRegenerate: () -> Unit
+) {
     val isUser = msg.role.equals("user", ignoreCase = true)
 
     Row(
@@ -632,13 +858,13 @@ private fun FloatingMessageBubble(msg: ChatMessage) {
                         modifier = Modifier.padding(bottom = 4.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Screenshot,
+                            imageVector = Icons.Default.CropFree,
                             contentDescription = "Screen Scan",
                             modifier = Modifier.size(13.dp),
                             tint = if (isUser) Color.White.copy(alpha = 0.8f) else MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            text = "Scanned Screen Query",
+                            text = "Screen Query",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (isUser) Color.White.copy(alpha = 0.8f) else MaterialTheme.colorScheme.primary
@@ -666,6 +892,65 @@ private fun FloatingMessageBubble(msg: ChatMessage) {
                         text = msg.text,
                         textColor = if (msg.isError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    // Action bar for AI response (Speak, Share, Copy, Regenerate)
+                    if (!msg.isError && msg.text.isNotBlank()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(
+                                onClick = { onSpeak(msg.text) },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isSpeaking) Icons.Default.Stop else Icons.AutoMirrored.Filled.VolumeUp,
+                                    contentDescription = if (isSpeaking) "Stop voice" else "Read aloud",
+                                    tint = if (isSpeaking) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { onCopy(msg.text) },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentCopy,
+                                    contentDescription = "Copy text",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { onShare(msg.text) },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Share,
+                                    contentDescription = "Share text",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = onRegenerate,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Regenerate answer",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

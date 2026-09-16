@@ -8,15 +8,21 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 
+@android.annotation.SuppressLint("InvalidFragmentVersionForActivityResult")
 class ScreenCapturePermissionActivity : ComponentActivity() {
 
     private val captureLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
+        val granted = onScreenCapturePermissionGranted
+        val denied = onScreenCapturePermissionDenied
+        onScreenCapturePermissionGranted = null
+        onScreenCapturePermissionDenied = null
+
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-            onScreenCapturePermissionGranted?.invoke(result.resultCode, result.data!!)
+            granted?.invoke(result.resultCode, result.data!!)
         } else {
-            onScreenCapturePermissionDenied?.invoke()
+            denied?.invoke()
         }
         finish()
     }
@@ -26,6 +32,12 @@ class ScreenCapturePermissionActivity : ComponentActivity() {
         val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         val intent = projectionManager.createScreenCaptureIntent()
         captureLauncher.launch(intent)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        onScreenCapturePermissionGranted = null
+        onScreenCapturePermissionDenied = null
     }
 
     companion object {

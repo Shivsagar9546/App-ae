@@ -27,7 +27,8 @@ class GeminiApiClient {
         model: String,
         systemPrompt: String,
         messages: List<AiMessage>,
-        imageInlineBase64: String? = null
+        imageInlineBase64: String? = null,
+        imagesInlineBase64: List<String> = emptyList()
     ): AiResult = withContext(Dispatchers.IO) {
         val key = if (!apiKeyOverride.isNullOrBlank()) {
             apiKeyOverride
@@ -46,13 +47,19 @@ class GeminiApiClient {
             )
         }
 
+        val allImages = when {
+            imagesInlineBase64.isNotEmpty() -> imagesInlineBase64
+            !imageInlineBase64.isNullOrBlank() -> listOf(imageInlineBase64)
+            else -> emptyList()
+        }
+
+        // Fast priority models according to current Gemini API standards: gemini-3.5-flash, gemini-flash-latest, etc.
         val requestedModel = if (model.isNotBlank()) model else "gemini-3.5-flash"
         val modelsToTry = mutableListOf<String>().apply {
             add(requestedModel)
-            // Cascade fallbacks if high demand / overloaded
-            if (requestedModel != "gemini-2.5-flash-preview-12-2025") add("gemini-2.5-flash-preview-12-2025")
-            if (requestedModel != "gemini-3.1-flash-lite-preview") add("gemini-3.1-flash-lite-preview")
+            if (requestedModel != "gemini-3.5-flash") add("gemini-3.5-flash")
             if (requestedModel != "gemini-flash-latest") add("gemini-flash-latest")
+            if (requestedModel != "gemini-3.1-flash-lite-preview") add("gemini-3.1-flash-lite-preview")
             if (requestedModel != "gemini-3.1-pro-preview") add("gemini-3.1-pro-preview")
         }.distinct()
 
@@ -85,13 +92,23 @@ class GeminiApiClient {
                         partsArray.put(JSONObject().put("text", msg.text))
                     }
 
-                    // If this is the latest message and has image, attach it
-                    val imgData = if (index == messages.lastIndex) (imageInlineBase64 ?: msg.imageBase64) else msg.imageBase64
-                    if (!imgData.isNullOrBlank()) {
-                        val inlineDataObj = JSONObject()
-                        inlineDataObj.put("mimeType", "image/jpeg")
-                        inlineDataObj.put("data", imgData)
-                        partsArray.put(JSONObject().put("inlineData", inlineDataObj))
+                    // Attach images for this message
+                    val messageImages = if (index == messages.lastIndex) {
+                        if (allImages.isNotEmpty()) allImages
+                        else if (!msg.imageBase64.isNullOrBlank()) listOf(msg.imageBase64)
+                        else emptyList()
+                    } else {
+                        if (!msg.imageBase64.isNullOrBlank()) listOf(msg.imageBase64)
+                        else emptyList()
+                    }
+
+                    messageImages.forEach { imgData ->
+                        if (imgData.isNotBlank()) {
+                            val inlineDataObj = JSONObject()
+                            inlineDataObj.put("mimeType", "image/jpeg")
+                            inlineDataObj.put("data", imgData)
+                            partsArray.put(JSONObject().put("inlineData", inlineDataObj))
+                        }
                     }
 
                     if (partsArray.length() > 0) {
@@ -100,7 +117,7 @@ class GeminiApiClient {
                     }
                 }
 
-                // If empty, add a default prompt
+                // If empty, add default prompt
                 if (contentsArray.length() == 0) {
                     val contentObj = JSONObject()
                     contentObj.put("role", "user")
@@ -112,9 +129,11 @@ class GeminiApiClient {
 
                 rootJson.put("contents", contentsArray)
 
-                // Generation config
+                // Generation config: Low temperature for direct, fast and accurate responses
                 val genConfig = JSONObject()
-                genConfig.put("temperature", 0.7)
+                genConfig.put("temperature", 0.3)
+                genConfig.put("maxOutputTokens", 2048)
+
                 rootJson.put("generationConfig", genConfig)
 
                 val requestBody = rootJson.toString().toRequestBody(jsonMediaType)
@@ -149,7 +168,7 @@ class GeminiApiClient {
 
                     if (isHighDemandOrOverload && targetModel != modelsToTry.last()) {
                         Log.w("GeminiApiClient", "Model $targetModel is overloaded ($errorMsg). Trying next fallback model...")
-                        kotlinx.coroutines.delay(400)
+                        kotlinx.coroutines.delay(200)
                         continue
                     }
 

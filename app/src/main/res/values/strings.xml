@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">OmniAI</string>
+    <string name="accessibility_service_label">OmniAI Instant Screen Reader</string>
+    <string name="accessibility_service_description">Reads screen text directly to explain, summarize, or solve questions instantly without asking for recording or casting permission.</string>
 </resources>

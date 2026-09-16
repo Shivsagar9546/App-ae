@@ -34,6 +34,7 @@ import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.util.UUID
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as OmniAIApplication
@@ -66,6 +67,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _attachedBitmap = MutableStateFlow<Bitmap?>(null)
     val attachedBitmap: StateFlow<Bitmap?> = _attachedBitmap.asStateFlow()
 
+    private val _attachedBitmaps = MutableStateFlow<List<Bitmap>>(emptyList())
+    val attachedBitmaps: StateFlow<List<Bitmap>> = _attachedBitmaps.asStateFlow()
+
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
 
@@ -79,13 +83,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startNewChat() {
         stopGeneration()
-        _attachedBitmap.value = null
+        clearAttachedBitmaps()
         _currentConversationId.value = UUID.randomUUID().toString()
     }
 
     fun selectConversation(id: String) {
         stopGeneration()
-        _attachedBitmap.value = null
+        clearAttachedBitmaps()
         _currentConversationId.value = id
     }
 
@@ -94,13 +98,31 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun attachImageUri(uri: Uri) {
+        attachMultipleImageUris(listOf(uri))
+    }
+
+    fun attachMultipleImageUris(uris: List<Uri>) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val context = getApplication<Application>()
-                val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
-                val bitmap = BitmapFactory.decodeStream(inputStream)
-                inputStream?.close()
-                _attachedBitmap.value = bitmap
+                val loadedBitmaps = mutableListOf<Bitmap>()
+                val currentCount = _attachedBitmaps.value.size
+                val capacity = (10 - currentCount).coerceAtLeast(0)
+
+                uris.take(capacity).forEach { uri ->
+                    decodeSampledBitmap(context, uri, 1280, 1280)?.let { bmp ->
+                        loadedBitmaps.add(bmp)
+                    }
+                }
+
+                if (loadedBitmaps.isNotEmpty()) {
+                    val updated = (_attachedBitmaps.value + loadedBitmaps).take(10)
+                    _attachedBitmaps.value = updated
+                    _attachedBitmap.value = updated.firstOrNull()
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "${loadedBitmaps.size} photo(s) attached! (Total ${updated.size}/10)", Toast.LENGTH_SHORT).show()
+                    }
+                }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(getApplication(), "Failed to load image: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -109,54 +131,124 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun decodeSampledBitmap(context: Context, uri: Uri, reqWidth: Int, reqHeight: Int): Bitmap? {
+        return try {
+            val options = BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, options)
+            }
+
+            var inSampleSize = 1
+            if (options.outHeight > reqHeight || options.outWidth > reqWidth) {
+                val halfHeight: Int = options.outHeight / 2
+                val halfWidth: Int = options.outWidth / 2
+                while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+                    inSampleSize *= 2
+                }
+            }
+
+            val decodeOptions = BitmapFactory.Options().apply {
+                this.inSampleSize = inSampleSize
+                inPreferredConfig = Bitmap.Config.RGB_565
+            }
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, decodeOptions)
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun addAttachedBitmaps(bitmaps: List<Bitmap>) {
+        val updated = (_attachedBitmaps.value + bitmaps).take(10)
+        _attachedBitmaps.value = updated
+        _attachedBitmap.value = updated.firstOrNull()
+    }
+
+    fun removeAttachedBitmapAt(index: Int) {
+        val current = _attachedBitmaps.value.toMutableList()
+        if (index in current.indices) {
+            current.removeAt(index)
+            _attachedBitmaps.value = current
+            _attachedBitmap.value = current.firstOrNull()
+        }
+    }
+
     fun setAttachedBitmap(bitmap: Bitmap?) {
-        _attachedBitmap.value = bitmap
+        if (bitmap == null) {
+            clearAttachedBitmaps()
+        } else {
+            val updated = (_attachedBitmaps.value + bitmap).take(10)
+            _attachedBitmaps.value = updated
+            _attachedBitmap.value = bitmap
+        }
+    }
+
+    fun clearAttachedBitmaps() {
+        _attachedBitmap.value = null
+        _attachedBitmaps.value = emptyList()
     }
 
     fun clearAttachedBitmap() {
-        _attachedBitmap.value = null
+        clearAttachedBitmaps()
     }
 
     fun sendMessage(promptText: String, isScan: Boolean = false) {
-        if (promptText.isBlank() && _attachedBitmap.value == null) return
-
-        val text = promptText.trim()
-        val image = _attachedBitmap.value
-        _attachedBitmap.value = null
-
-        val convId = _currentConversationId.value
-
-        // Convert attached image to base64 for persistent chat history display
-        val imageBase64 = image?.let { bmp ->
-            try {
-                val maxDim = 800
-                var scaled = bmp
-                if (bmp.width > maxDim || bmp.height > maxDim) {
-                    val ratio = bmp.width.toFloat() / bmp.height.toFloat()
-                    val newW = if (bmp.width > bmp.height) maxDim else (maxDim * ratio).toInt()
-                    val newH = if (bmp.width > bmp.height) (maxDim / ratio).toInt() else maxDim
-                    scaled = Bitmap.createScaledBitmap(bmp, newW.coerceAtLeast(1), newH.coerceAtLeast(1), true)
-                }
-                val stream = ByteArrayOutputStream()
-                scaled.compress(Bitmap.CompressFormat.JPEG, 75, stream)
-                Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
-            } catch (e: Exception) {
-                null
-            }
+        val currentBitmaps = if (_attachedBitmaps.value.isNotEmpty()) {
+            _attachedBitmaps.value
+        } else {
+            listOfNotNull(_attachedBitmap.value)
         }
 
-        val userMessage = ChatMessage(
-            conversationId = convId,
-            role = "user",
-            text = text,
-            imageBase64 = imageBase64,
-            isScreenScan = isScan,
-            timestamp = System.currentTimeMillis()
-        )
+        if (promptText.isBlank() && currentBitmaps.isEmpty()) return
+
+        val text = promptText.trim()
+        val images = currentBitmaps.toList()
+        clearAttachedBitmaps()
+
+        val convId = _currentConversationId.value
+        val primaryImage = images.firstOrNull()
 
         generationJob?.cancel()
         generationJob = viewModelScope.launch {
             _isGenerating.value = true
+            _statusMessage.value = when {
+                images.size > 1 -> "Analyzing ${images.size} photos step-by-step..."
+                images.size == 1 -> "Analyzing photo..."
+                else -> "OmniAI is thinking..."
+            }
+
+            // Quick downsample first image to base64 for persistent chat history display in background
+            val imageBase64 = withContext(Dispatchers.Default) {
+                primaryImage?.let { bmp ->
+                    try {
+                        val maxDim = 800
+                        var scaled = bmp
+                        if (bmp.width > maxDim || bmp.height > maxDim) {
+                            val ratio = bmp.width.toFloat() / bmp.height.toFloat()
+                            val newW = if (bmp.width > bmp.height) maxDim else (maxDim * ratio).toInt()
+                            val newH = if (bmp.width > bmp.height) (maxDim / ratio).toInt() else maxDim
+                            scaled = Bitmap.createScaledBitmap(bmp, newW.coerceAtLeast(1), newH.coerceAtLeast(1), true)
+                        }
+                        val stream = ByteArrayOutputStream()
+                        scaled.compress(Bitmap.CompressFormat.JPEG, 70, stream)
+                        Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+            }
+
+            val userMessage = ChatMessage(
+                conversationId = convId,
+                role = "user",
+                text = text,
+                imageBase64 = imageBase64,
+                isScreenScan = isScan,
+                timestamp = System.currentTimeMillis()
+            )
 
             // Ensure conversation row exists in DB
             val existing = chatDao.getConversationById(convId)
@@ -164,16 +256,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 chatDao.insertConversation(
                     Conversation(
                         id = convId,
-                        title = if (text.isNotBlank()) text.take(32) else "Image Query",
+                        title = if (text.isNotBlank()) text.take(32) else "Image Query (${images.size} photos)",
                         updatedAt = System.currentTimeMillis(),
-                        lastMessagePreview = text.ifBlank { "Image analysis" }
+                        lastMessagePreview = text.ifBlank { "Attached ${images.size} photo(s)" }
                     )
                 )
             } else {
                 chatDao.updateConversation(
                     existing.copy(
                         updatedAt = System.currentTimeMillis(),
-                        lastMessagePreview = text.ifBlank { "Image analysis" }
+                        lastMessagePreview = text.ifBlank { "Attached ${images.size} photo(s)" }
                     )
                 )
             }
@@ -189,7 +281,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             val result = aiRepository.askAi(
                 messages = aiMessages,
-                imageBitmap = image,
+                imageBitmap = primaryImage,
+                imageBitmaps = images,
                 isScreenScan = isScan
             )
 

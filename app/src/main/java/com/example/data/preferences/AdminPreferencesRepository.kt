@@ -30,7 +30,7 @@ data class AdminSettings(
     val systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
     val isScreenScanEnabled: Boolean = true,
     val isAreaScanEnabled: Boolean = true,
-    val maxImageResolution: Int = 1920,
+    val maxImageResolution: Int = 1024,
     val adminPin: String = "1234",
     val appTheme: String = "system", // "system", "dark", "light"
     val preferredLanguage: String = "hinglish", // "en", "hi", "hinglish"

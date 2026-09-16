@@ -35,16 +35,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -59,14 +62,12 @@ import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Screenshot
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.VolumeOff
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
@@ -88,6 +89,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -119,7 +121,6 @@ import com.example.ui.components.AnimatedTypingIndicator
 import com.example.ui.components.AttachmentBottomSheet
 import com.example.ui.components.GeminiDirectWebView
 import com.example.ui.components.MarkdownText
-import com.example.ui.components.OfflineCalculatorSheet
 import com.example.ui.components.QuickActionChips
 import com.example.ui.theme.AiBubbleGradientEnd
 import com.example.ui.theme.AiBubbleGradientStart
@@ -139,6 +140,7 @@ fun MainChatScreen(
     val messages by viewModel.currentMessages.collectAsState()
     val isGenerating by viewModel.isGenerating.collectAsState()
     val attachedBitmap by viewModel.attachedBitmap.collectAsState()
+    val attachedBitmaps by viewModel.attachedBitmaps.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
     val adminSettings by viewModel.adminSettings.collectAsState()
     val isListening by viewModel.voiceHelper.isListening.collectAsState()
@@ -146,25 +148,26 @@ fun MainChatScreen(
     var activeMode by remember { mutableIntStateOf(0) } // 0: AI Assistant, 1: Gemini Direct Web (No API)
     var inputText by remember { mutableStateOf("") }
     var showAttachmentMenu by remember { mutableStateOf(false) }
-    var showCalculatorSheet by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
     val ttsSpeakingId by TtsManager.currentSpeakingId.collectAsState()
     val isTtsSpeaking by TtsManager.isSpeaking.collectAsState()
 
-    // Gallery Picker Launcher (Standard Photo Picker)
-    val galleryLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.attachImageUri(it) }
+    // Multiple Gallery Photos Picker Launcher (Up to 10 photos)
+    val multipleGalleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 10)
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            viewModel.attachMultipleImageUris(uris)
+        }
     }
 
     // Camera Launcher
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicturePreview()
     ) { bitmap: Bitmap? ->
-        bitmap?.let { viewModel.setAttachedBitmap(it) }
+        bitmap?.let { viewModel.addAttachedBitmaps(listOf(it)) }
     }
 
     // PDF Document Picker Launcher
@@ -363,11 +366,13 @@ fun MainChatScreen(
                 // Direct Google Gemini Web Chat (Uses official Google interface, 0 API config)
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
+                        .weight(1f)
+                        .fillMaxWidth()
                         .navigationBarsPadding()
                 ) {
                     GeminiDirectWebView(
                         isCompact = false,
+                        onBackToAssistant = { activeMode = 0 },
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -396,288 +401,320 @@ fun MainChatScreen(
                         }
                     }
                 }
-            }
 
-            // Chat Messages / Welcome Empty State
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-            ) {
-                if (messages.isEmpty() && !isGenerating) {
-                    WelcomeHomeLayout(
-                        onPromptSelected = { prompt ->
-                            viewModel.sendMessage(prompt)
-                        },
-                        onScanScreenClicked = {
-                            viewModel.triggerScreenScan(context)
-                        },
-                        onFloatingAssistantClicked = onNavigateToFloatingHub,
-                        onSwitchToGeminiWeb = {
-                            activeMode = 1
-                        },
-                        onCameraClicked = {
-                            cameraLauncher.launch(null)
-                        },
-                        onGalleryClicked = {
-                            galleryLauncher.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
-                        },
-                        onPdfClicked = {
-                            pdfLauncher.launch("application/pdf")
-                        },
-                        onCalculatorClicked = {
-                            showCalculatorSheet = true
-                        }
-                    )
-                } else {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp)
-                    ) {
-                        items(messages) { msg ->
-                            val isThisMsgSpeaking = isTtsSpeaking && (ttsSpeakingId == msg.id.toString())
-                            ChatMessageCard(
-                                message = msg,
-                                isSpeaking = isThisMsgSpeaking,
-                                onSpeak = {
-                                    if (isThisMsgSpeaking) {
-                                        TtsManager.stop()
-                                    } else {
-                                        TtsManager.speak(msg.text, msg.id.toString())
+                // Chat Messages / Welcome Empty State
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    if (messages.isEmpty() && !isGenerating) {
+                        WelcomeHomeLayout(
+                            onPromptSelected = { prompt ->
+                                viewModel.sendMessage(prompt)
+                            },
+                            onFloatingAssistantClicked = onNavigateToFloatingHub,
+                            onSwitchToGeminiWeb = {
+                                activeMode = 1
+                            },
+                            onCameraClicked = {
+                                cameraLauncher.launch(null)
+                            },
+                            onGalleryClicked = {
+                                multipleGalleryLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                            onPdfClicked = {
+                                pdfLauncher.launch("application/pdf")
+                            }
+                        )
+                    } else {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp)
+                        ) {
+                            items(messages, key = { it.id }) { msg ->
+                                val isThisMsgSpeaking = isTtsSpeaking && (ttsSpeakingId == msg.id.toString())
+                                ChatMessageCard(
+                                    message = msg,
+                                    isSpeaking = isThisMsgSpeaking,
+                                    onSpeak = {
+                                        if (isThisMsgSpeaking) {
+                                            TtsManager.stop()
+                                        } else {
+                                            TtsManager.speak(msg.text, msg.id.toString())
+                                        }
+                                    },
+                                    onShare = {
+                                        val sendIntent = Intent().apply {
+                                            action = Intent.ACTION_SEND
+                                            putExtra(Intent.EXTRA_TEXT, "✨ Solution by OmniAI Assistant:\n\n${msg.text}")
+                                            type = "text/plain"
+                                        }
+                                        context.startActivity(Intent.createChooser(sendIntent, "Share solution"))
+                                    },
+                                    onCopyText = {
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        val clip = ClipData.newPlainText("AI Message", msg.text)
+                                        clipboard.setPrimaryClip(clip)
+                                        Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                                    },
+                                    onRegenerate = {
+                                        viewModel.regenerateLastResponse()
                                     }
-                                },
-                                onShare = {
-                                    val sendIntent = Intent().apply {
-                                        action = Intent.ACTION_SEND
-                                        putExtra(Intent.EXTRA_TEXT, "✨ Solution by OmniAI Assistant:\n\n${msg.text}")
-                                        type = "text/plain"
+                                )
+                            }
+
+                            if (isGenerating) {
+                                item {
+                                    Row(
+                                        modifier = Modifier.padding(start = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        AnimatedTypingIndicator()
+                                        Text(
+                                            text = "OmniAI is thinking...",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
-                                    context.startActivity(Intent.createChooser(sendIntent, "Share solution"))
-                                },
-                                onCopyText = {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    val clip = ClipData.newPlainText("AI Message", msg.text)
-                                    clipboard.setPrimaryClip(clip)
-                                    Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
-                                },
-                                onRegenerate = {
-                                    viewModel.regenerateLastResponse()
                                 }
-                            )
+                            }
                         }
+                    }
+                }
 
-                        if (isGenerating) {
-                            item {
+                // Attached images preview (up to 10 photos carousel)
+                if (attachedBitmaps.isNotEmpty()) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Row(
-                                    modifier = Modifier.padding(start = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    AnimatedTypingIndicator()
+                                    Icon(
+                                        imageVector = Icons.Default.Image,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
                                     Text(
-                                        text = "OmniAI is thinking...",
-                                        style = MaterialTheme.typography.bodySmall,
+                                        text = "Attached Photos (${attachedBitmaps.size}/10)",
+                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
+
+                                TextButton(
+                                    onClick = { viewModel.clearAttachedBitmaps() },
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "Clear All",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                itemsIndexed(attachedBitmaps) { index, bmp ->
+                                    Box(
+                                        modifier = Modifier
+                                            .size(64.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+                                    ) {
+                                        Image(
+                                            bitmap = bmp.asImageBitmap(),
+                                            contentDescription = "Photo ${index + 1}",
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                        )
+
+                                        // Close badge
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(2.dp)
+                                                .size(20.dp)
+                                                .background(Color.Black.copy(alpha = 0.65f), CircleShape)
+                                                .clickable { viewModel.removeAttachedBitmapAt(index) },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Remove photo",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            // Attached image preview if selected
-            if (attachedBitmap != null) {
+                // Quick Action suggestions if messages exist
+                if (messages.isNotEmpty()) {
+                    QuickActionChips(
+                        onActionSelected = { prompt ->
+                            viewModel.sendMessage(prompt)
+                        }
+                    )
+                }
+
+                // Bottom Input & Controls Dock (ChatGPT-Style)
                 Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 6.dp,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .shadow(8.dp)
                 ) {
                     Row(
-                        modifier = Modifier.padding(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        // ChatGPT '+' Attachment Button
+                        Surface(
+                            onClick = { showAttachmentMenu = true },
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier
+                                .size(42.dp)
+                                .testTag("chatgpt_plus_button")
                         ) {
-                            Image(
-                                bitmap = attachedBitmap!!.asImageBitmap(),
-                                contentDescription = "Attached Image",
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                            )
-                            Column {
-                                Text(
-                                    text = "Image attached",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
-                                )
-                                Text(
-                                    text = "${attachedBitmap!!.width}x${attachedBitmap!!.height} px",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Add attachments and tools",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(22.dp)
                                 )
                             }
                         }
 
-                        IconButton(
-                            onClick = { viewModel.clearAttachedBitmap() }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Remove Image",
-                                tint = MaterialTheme.colorScheme.error
+                        // Spacious ChatGPT-Style Text Input Pill
+                        OutlinedTextField(
+                            value = inputText,
+                            onValueChange = { inputText = it },
+                            placeholder = {
+                                Text(
+                                    text = "Message...",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("main_chat_input"),
+                            shape = RoundedCornerShape(26.dp),
+                            maxLines = 5,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                                unfocusedBorderColor = Color.Transparent
                             )
-                        }
-                    }
-                }
-            }
-
-            // Quick Action suggestions if messages exist
-            if (messages.isNotEmpty()) {
-                QuickActionChips(
-                    onActionSelected = { prompt ->
-                        viewModel.sendMessage(prompt)
-                    }
-                )
-            }
-
-            // Bottom Input & Controls Dock (ChatGPT-Style)
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 6.dp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .shadow(8.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // ChatGPT '+' Attachment Button
-                    Surface(
-                        onClick = { showAttachmentMenu = true },
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier
-                            .size(42.dp)
-                            .testTag("chatgpt_plus_button")
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "Add attachments and tools",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    }
-
-                    // Spacious ChatGPT-Style Text Input Pill
-                    OutlinedTextField(
-                        value = inputText,
-                        onValueChange = { inputText = it },
-                        placeholder = {
-                            Text(
-                                text = "Message...",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("main_chat_input"),
-                        shape = RoundedCornerShape(26.dp),
-                        maxLines = 5,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                            unfocusedBorderColor = Color.Transparent
                         )
-                    )
 
-                    // Voice Mic Button
-                    Surface(
-                        onClick = {
-                            if (isListening) {
-                                viewModel.voiceHelper.stopListening()
-                            } else {
-                                viewModel.voiceHelper.startListening(
-                                    languageCode = "en-IN",
-                                    onResult = { recognized ->
-                                        inputText = recognized
-                                    }
-                                )
-                            }
-                        },
-                        shape = CircleShape,
-                        color = if (isListening) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier
-                            .size(42.dp)
-                            .testTag("main_chat_mic_button")
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.Mic,
-                                contentDescription = "Voice Input",
-                                tint = if (isListening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-
-                    // Send / Stop Button
-                    if (isGenerating) {
-                        FilledIconButton(
-                            onClick = { viewModel.stopGeneration() },
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.error
-                            ),
-                            modifier = Modifier.size(42.dp).testTag("stop_generation_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Stop,
-                                contentDescription = "Stop",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    } else {
-                        val canSend = inputText.isNotBlank() || attachedBitmap != null
-                        FilledIconButton(
+                        // Voice Mic Button
+                        Surface(
                             onClick = {
-                                if (canSend) {
-                                    viewModel.sendMessage(inputText)
-                                    inputText = ""
+                                if (isListening) {
+                                    viewModel.voiceHelper.stopListening()
+                                } else {
+                                    viewModel.voiceHelper.startListening(
+                                        languageCode = "en-IN",
+                                        onResult = { recognized ->
+                                            inputText = recognized
+                                        }
+                                    )
                                 }
                             },
-                            enabled = canSend,
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = if (canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                            ),
-                            modifier = Modifier.size(42.dp).testTag("main_chat_send_button")
+                            shape = CircleShape,
+                            color = if (isListening) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier
+                                .size(42.dp)
+                                .testTag("main_chat_mic_button")
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Send,
-                                contentDescription = "Send",
-                                tint = if (canSend) Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                                modifier = Modifier.size(18.dp)
-                            )
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Mic,
+                                    contentDescription = "Voice Input",
+                                    tint = if (isListening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        // Send / Stop Button
+                        if (isGenerating) {
+                            FilledIconButton(
+                                onClick = { viewModel.stopGeneration() },
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.error
+                                ),
+                                modifier = Modifier.size(42.dp).testTag("stop_generation_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Stop,
+                                    contentDescription = "Stop",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        } else {
+                            val canSend = inputText.isNotBlank() || attachedBitmaps.isNotEmpty()
+                            FilledIconButton(
+                                onClick = {
+                                    if (canSend) {
+                                        viewModel.sendMessage(inputText)
+                                        inputText = ""
+                                    }
+                                },
+                                enabled = canSend,
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = if (canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                                ),
+                                modifier = Modifier.size(42.dp).testTag("main_chat_send_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = "Send",
+                                    tint = if (canSend) Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -690,22 +727,11 @@ fun MainChatScreen(
             onDismiss = { showAttachmentMenu = false },
             onCameraClick = { cameraLauncher.launch(null) },
             onGalleryClick = {
-                galleryLauncher.launch(
+                multipleGalleryLauncher.launch(
                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                 )
             },
-            onPdfClick = { pdfLauncher.launch("application/pdf") },
-            onScreenScanClick = { viewModel.triggerScreenScan(context) },
-            onCalculatorClick = { showCalculatorSheet = true }
-        )
-    }
-
-    if (showCalculatorSheet) {
-        OfflineCalculatorSheet(
-            onDismiss = { showCalculatorSheet = false },
-            onPasteResult = { res ->
-                inputText = if (inputText.isBlank()) res else "$inputText $res"
-            }
+            onPdfClick = { pdfLauncher.launch("application/pdf") }
         )
     }
 }
@@ -713,13 +739,11 @@ fun MainChatScreen(
 @Composable
 private fun WelcomeHomeLayout(
     onPromptSelected: (String) -> Unit,
-    onScanScreenClicked: () -> Unit,
     onFloatingAssistantClicked: () -> Unit,
     onSwitchToGeminiWeb: () -> Unit,
     onCameraClicked: () -> Unit,
     onGalleryClicked: () -> Unit,
-    onPdfClicked: () -> Unit,
-    onCalculatorClicked: () -> Unit
+    onPdfClicked: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -792,7 +816,7 @@ private fun WelcomeHomeLayout(
                         modifier = Modifier.size(22.dp)
                     )
                     Text(
-                        text = "Scan Problem",
+                        text = "Take Photo",
                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -924,7 +948,7 @@ private fun WelcomeHomeLayout(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Icon(
-                        imageVector = Icons.Default.Send,
+                        imageVector = Icons.AutoMirrored.Filled.Send,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                         modifier = Modifier.size(16.dp)
@@ -1083,7 +1107,7 @@ private fun ChatMessageCard(
                             .testTag("tts_speak_button")
                     ) {
                         Icon(
-                            imageVector = if (isSpeaking) Icons.Default.Stop else Icons.Default.VolumeUp,
+                            imageVector = if (isSpeaking) Icons.Default.Stop else Icons.AutoMirrored.Filled.VolumeUp,
                             contentDescription = if (isSpeaking) "Stop voice" else "Read aloud",
                             tint = if (isSpeaking) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(16.dp)

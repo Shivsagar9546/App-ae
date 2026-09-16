@@ -54,6 +54,7 @@ import com.example.ui.theme.OmniAITheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -259,8 +260,16 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         hideQuickHud()
 
         if (bubbleView != null) {
-            bubbleView?.visibility = View.VISIBLE
-            return
+            try {
+                bubbleView?.visibility = View.VISIBLE
+                windowManager.updateViewLayout(bubbleView, bubbleParams)
+                return
+            } catch (e: Exception) {
+                try {
+                    windowManager.removeView(bubbleView)
+                } catch (ex: Exception) {}
+                bubbleView = null
+            }
         }
 
         val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -274,7 +283,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             layoutFlag,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -300,8 +309,46 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         gradientPreset = adminSettings.bubbleGradient,
                         bubbleSize = adminSettings.bubbleSize,
                         bubbleAlpha = adminSettings.bubbleAlpha,
+                        onUpdateAlpha = { newAlpha ->
+                            serviceScope.launch {
+                                omniApp.adminPreferences.updateSettings(bubbleAlpha = newAlpha)
+                            }
+                        },
+                        onDrag = { dx, dy ->
+                            bubbleParams?.let { params ->
+                                updateScreenDimensions()
+                                val bubbleW = bubbleView?.width?.takeIf { it > 0 } ?: 160
+                                val bubbleH = bubbleView?.height?.takeIf { it > 0 } ?: 160
+                                val maxX = (screenWidth - bubbleW).coerceAtLeast(0)
+                                val maxY = (screenHeight - bubbleH).coerceAtLeast(0)
+
+                                params.x = (params.x + dx.toInt()).coerceIn(0, maxX)
+                                params.y = (params.y + dy.toInt()).coerceIn(0, maxY)
+                                try {
+                                    windowManager.updateViewLayout(bubbleView, params)
+                                } catch (e: Exception) {}
+                            }
+                        },
+                        onDragEnd = {
+                            bubbleParams?.let { params ->
+                                updateScreenDimensions()
+                                val bubbleW = bubbleView?.width?.takeIf { it > 0 } ?: 160
+                                val bubbleH = bubbleView?.height?.takeIf { it > 0 } ?: 160
+                                val maxX = (screenWidth - bubbleW).coerceAtLeast(0)
+                                val maxY = (screenHeight - bubbleH).coerceAtLeast(0)
+
+                                params.x = params.x.coerceIn(0, maxX)
+                                params.y = params.y.coerceIn(0, maxY)
+                                try {
+                                    windowManager.updateViewLayout(bubbleView, params)
+                                } catch (e: Exception) {}
+                            }
+                        },
                         onBubbleClick = {
                             showPopup()
+                        },
+                        onInstantTextScan = {
+                            startInstantTextScan()
                         },
                         onScanScreen = {
                             startScreenScan(cropRect = null)
@@ -329,53 +376,6 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                             stopSelf()
                         }
                     )
-                }
-            }
-
-            var initialX = 0
-            var initialY = 0
-            var touchStartX = 0f
-            var touchStartY = 0f
-            var isDragging = false
-
-            setOnTouchListener { _, event ->
-                when (event.action) {
-                    MotionEvent.ACTION_DOWN -> {
-                        initialX = bubbleParams?.x ?: 0
-                        initialY = bubbleParams?.y ?: 0
-                        touchStartX = event.rawX
-                        touchStartY = event.rawY
-                        isDragging = false
-                        true
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        val dx = (event.rawX - touchStartX).toInt()
-                        val dy = (event.rawY - touchStartY).toInt()
-                        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
-                            isDragging = true
-                            bubbleParams?.x = initialX + dx
-                            bubbleParams?.y = initialY + dy
-                            try {
-                                windowManager.updateViewLayout(bubbleView, bubbleParams)
-                            } catch (e: Exception) {}
-                        }
-                        true
-                    }
-                    MotionEvent.ACTION_UP -> {
-                        if (!isDragging) {
-                            showPopup()
-                        } else {
-                            bubbleParams?.let { params ->
-                                val midX = screenWidth / 2
-                                params.x = if (params.x < midX) 20 else (screenWidth - 200)
-                                try {
-                                    windowManager.updateViewLayout(bubbleView, bubbleParams)
-                                } catch (e: Exception) {}
-                            }
-                        }
-                        true
-                    }
-                    else -> false
                 }
             }
         }
@@ -435,6 +435,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             gravity = Gravity.CENTER
             x = 0
             y = 0
+            @Suppress("DEPRECATION")
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
 
@@ -456,6 +457,9 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         onSendMessage = { text, img ->
                             sendMessage(text, img, isScan = false)
                         },
+                        onInstantTextScan = {
+                            startInstantTextScan()
+                        },
                         onScanScreen = {
                             startScreenScan(cropRect = null)
                         },
@@ -468,8 +472,31 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         onQuickHud = {
                             startQuickHudSolve(cropRect = null)
                         },
+                        onPickGalleryImage = { callback ->
+                            FloatingImagePickerActivity.launchGalleryPicker(this@FloatingAssistantService) { bitmap ->
+                                callback(bitmap)
+                            }
+                        },
+                        onTakePhoto = { callback ->
+                            FloatingImagePickerActivity.launchCameraPicker(this@FloatingAssistantService) { bitmap ->
+                                callback(bitmap)
+                            }
+                        },
                         onVoiceInput = {
                             startVoiceQuery()
+                        },
+                        onSpeakText = { text ->
+                            if (text.isBlank()) {
+                                textToSpeech?.stop()
+                            } else {
+                                speakText(text)
+                            }
+                        },
+                        onClearMessages = {
+                            clearChat()
+                        },
+                        onRegenerate = {
+                            regenerateLastResponse()
                         },
                         onMinimize = {
                             minimizePopup()
@@ -904,6 +931,55 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     // SCREEN SCAN & AI LOGIC
     // ==========================================
 
+    /**
+     * Reads screen text directly using Accessibility Service.
+     * ZERO "Start recording or casting with OmniAI?" system dialogs.
+     */
+    fun startInstantTextScan() {
+        if (!ScreenReaderAccessibilityService.isServiceEnabled(this)) {
+            Toast.makeText(
+                this,
+                "⚡ Turn ON 'OmniAI Instant Screen Reader' in Accessibility Settings to read screen text without recording popups!",
+                Toast.LENGTH_LONG
+            ).show()
+            ScreenReaderAccessibilityService.openAccessibilitySettings(this)
+            return
+        }
+
+        val a11y = ScreenReaderAccessibilityService.instance
+        if (a11y == null) {
+            Toast.makeText(this, "Screen Reader starting, please tap again in a moment.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        hidePopup()
+        hideBubble()
+        hideOcrGrabber()
+        hideQuickHud()
+
+        serviceScope.launch {
+            // Brief delay allowing background app window to gain active focus
+            kotlinx.coroutines.delay(250)
+            val extractedText = a11y.captureActiveScreenText()
+            showPopup()
+
+            if (!extractedText.isNullOrBlank()) {
+                _statusText.value = "Instant Screen Text captured! Analyzing with AI..."
+                sendMessage(
+                    text = "Explain, summarize, or solve the following screen text accurately:\n\n$extractedText",
+                    imageBitmap = null,
+                    isScan = true
+                )
+            } else {
+                Toast.makeText(
+                    this@FloatingAssistantService,
+                    "No digital text found on screen. Use 'Crop Area' or 'Photo Scan' for visual images.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
     fun startScreenScan(cropRect: Rect?) {
         _statusText.value = "Preparing Screen Scan..."
         hidePopup()
@@ -939,37 +1015,41 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     }
 
     private fun sendScreenAnalysisRequest(bitmap: Bitmap, prompt: String) {
-        val imageBase64 = try {
-            val maxDim = 800
-            var scaled = bitmap
-            if (bitmap.width > maxDim || bitmap.height > maxDim) {
-                val ratio = bitmap.width.toFloat() / bitmap.height.toFloat()
-                val newW = if (bitmap.width > bitmap.height) maxDim else (maxDim * ratio).toInt()
-                val newH = if (bitmap.width > bitmap.height) (maxDim / ratio).toInt() else maxDim
-                scaled = Bitmap.createScaledBitmap(bitmap, newW.coerceAtLeast(1), newH.coerceAtLeast(1), true)
-            }
-            val stream = java.io.ByteArrayOutputStream()
-            scaled.compress(Bitmap.CompressFormat.JPEG, 75, stream)
-            android.util.Base64.encodeToString(stream.toByteArray(), android.util.Base64.NO_WRAP)
-        } catch (e: Exception) {
-            null
-        }
-
-        val userMsg = ChatMessage(
-            conversationId = _currentConversationId.value,
-            role = "user",
-            text = prompt,
-            imageBase64 = imageBase64,
-            isScreenScan = true,
-            timestamp = System.currentTimeMillis()
-        )
-
-        _messages.value = _messages.value + userMsg
         _isGenerating.value = true
+        _statusText.value = "Analyzing screen..."
 
         serviceScope.launch {
             val app = application as OmniAIApplication
             val convId = _currentConversationId.value
+
+            val imageBase64 = withContext(Dispatchers.Default) {
+                try {
+                    val maxDim = 800
+                    var scaled = bitmap
+                    if (bitmap.width > maxDim || bitmap.height > maxDim) {
+                        val ratio = bitmap.width.toFloat() / bitmap.height.toFloat()
+                        val newW = if (bitmap.width > bitmap.height) maxDim else (maxDim * ratio).toInt()
+                        val newH = if (bitmap.width > bitmap.height) (maxDim / ratio).toInt() else maxDim
+                        scaled = Bitmap.createScaledBitmap(bitmap, newW.coerceAtLeast(1), newH.coerceAtLeast(1), true)
+                    }
+                    val stream = java.io.ByteArrayOutputStream()
+                    scaled.compress(Bitmap.CompressFormat.JPEG, 75, stream)
+                    android.util.Base64.encodeToString(stream.toByteArray(), android.util.Base64.NO_WRAP)
+                } catch (e: Exception) {
+                    null
+                }
+            }
+
+            val userMsg = ChatMessage(
+                conversationId = convId,
+                role = "user",
+                text = prompt,
+                imageBase64 = imageBase64,
+                isScreenScan = true,
+                timestamp = System.currentTimeMillis()
+            )
+
+            _messages.value = _messages.value + userMsg
 
             withContext(Dispatchers.IO) {
                 try {
@@ -1037,29 +1117,57 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     fun sendMessage(text: String, imageBitmap: Bitmap? = null, isScan: Boolean = false) {
         if (text.isBlank() && imageBitmap == null) return
 
-        val userMsg = ChatMessage(
-            conversationId = _currentConversationId.value,
-            role = "user",
-            text = text,
-            isScreenScan = isScan,
-            timestamp = System.currentTimeMillis()
-        )
+        val promptText = if (text.isBlank() && imageBitmap != null) {
+            "Explain this photo and solve or describe what is shown here."
+        } else {
+            text
+        }
 
-        _messages.value = _messages.value + userMsg
         _isGenerating.value = true
 
         serviceScope.launch {
             val app = application as OmniAIApplication
             val convId = _currentConversationId.value
 
+            val imageBase64 = withContext(Dispatchers.Default) {
+                imageBitmap?.let { bitmap ->
+                    try {
+                        val maxDim = 800
+                        var scaled = bitmap
+                        if (bitmap.width > maxDim || bitmap.height > maxDim) {
+                            val ratio = bitmap.width.toFloat() / bitmap.height.toFloat()
+                            val newW = if (bitmap.width > bitmap.height) maxDim else (maxDim * ratio).toInt()
+                            val newH = if (bitmap.width > bitmap.height) (maxDim / ratio).toInt() else maxDim
+                            scaled = Bitmap.createScaledBitmap(bitmap, newW.coerceAtLeast(1), newH.coerceAtLeast(1), true)
+                        }
+                        val stream = java.io.ByteArrayOutputStream()
+                        scaled.compress(Bitmap.CompressFormat.JPEG, 75, stream)
+                        android.util.Base64.encodeToString(stream.toByteArray(), android.util.Base64.NO_WRAP)
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+            }
+
+            val userMsg = ChatMessage(
+                conversationId = convId,
+                role = "user",
+                text = promptText,
+                imageBase64 = imageBase64,
+                isScreenScan = isScan,
+                timestamp = System.currentTimeMillis()
+            )
+
+            _messages.value = _messages.value + userMsg
+
             withContext(Dispatchers.IO) {
                 try {
                     app.database.chatDao().insertConversation(
                         Conversation(
                             id = convId,
-                            title = text.take(30),
+                            title = promptText.take(30),
                             updatedAt = System.currentTimeMillis(),
-                            lastMessagePreview = text
+                            lastMessagePreview = promptText
                         )
                     )
                     app.database.chatDao().insertMessage(userMsg)
@@ -1114,6 +1222,59 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         }
     }
 
+    fun clearChat() {
+        _messages.value = emptyList()
+        _currentConversationId.value = java.util.UUID.randomUUID().toString()
+    }
+
+    fun regenerateLastResponse() {
+        val currentMsgs = _messages.value
+        if (currentMsgs.isEmpty() || _isGenerating.value) return
+        val lastUserMsgIndex = currentMsgs.indexOfLast { it.role.equals("user", ignoreCase = true) }
+        if (lastUserMsgIndex != -1) {
+            val userMsg = currentMsgs[lastUserMsgIndex]
+            val filtered = currentMsgs.take(lastUserMsgIndex + 1)
+            _messages.value = filtered
+            _isGenerating.value = true
+
+            serviceScope.launch {
+                val app = application as OmniAIApplication
+                val convId = _currentConversationId.value
+                val aiMessages = filtered.map { AiMessage(role = it.role, text = it.text) }
+                val result = withContext(Dispatchers.IO) {
+                    aiRepository.askAi(messages = aiMessages, isScreenScan = userMsg.isScreenScan)
+                }
+                _isGenerating.value = false
+                when (result) {
+                    is AiResult.Success -> {
+                        val modelMsg = ChatMessage(
+                            conversationId = convId,
+                            role = "model",
+                            text = result.text,
+                            timestamp = System.currentTimeMillis()
+                        )
+                        _messages.value = _messages.value + modelMsg
+                        withContext(Dispatchers.IO) {
+                            try {
+                                app.database.chatDao().insertMessage(modelMsg)
+                            } catch (e: Exception) {}
+                        }
+                    }
+                    is AiResult.Error -> {
+                        val errorMsg = ChatMessage(
+                            conversationId = convId,
+                            role = "model",
+                            text = "⚠️ ${result.message}",
+                            isError = true,
+                            timestamp = System.currentTimeMillis()
+                        )
+                        _messages.value = _messages.value + errorMsg
+                    }
+                }
+            }
+        }
+    }
+
     fun startVoiceQuery() {
         voiceHelper.startListening(
             languageCode = "en-US",
@@ -1142,9 +1303,14 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             bubbleView = null
         }
         try {
+            voiceHelper.stopListening()
+        } catch (e: Exception) {}
+        try {
             textToSpeech?.stop()
             textToSpeech?.shutdown()
+            textToSpeech = null
         } catch (e: Exception) {}
+        serviceScope.cancel()
         appViewModelStore.clear()
         activeServiceInstance = null
     }

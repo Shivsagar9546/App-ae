@@ -54,6 +54,10 @@ class ScreenCaptureHelper(private val context: Context) {
                 } catch (e: Exception) {}
             }
 
+            continuation.invokeOnCancellation {
+                cleanup()
+            }
+
             try {
                 mediaProjection = projectionManager.getMediaProjection(resultCode, data)
                 if (mediaProjection == null) {
