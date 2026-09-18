@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -65,6 +66,8 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -84,6 +87,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
@@ -119,12 +123,15 @@ fun FloatingPopUpView(
     onMaximize: () -> Unit,
     onClose: () -> Unit,
     onDragHeader: (dx: Float, dy: Float) -> Unit,
-    onResize: (dw: Float, dh: Float) -> Unit
+    onResize: (dw: Float, dh: Float) -> Unit,
+    onAlphaChanged: (Float) -> Unit = {}
 ) {
     var inputText by remember { mutableStateOf("") }
     var currentTab by remember { mutableIntStateOf(0) } // 0: AI Tools, 1: Gemini Direct Web
     var attachedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var currentlySpeakingText by remember { mutableStateOf<String?>(null) }
+    var windowAlpha by remember { mutableStateOf(1.0f) }
+    var isTransparencySliderOpen by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
@@ -137,15 +144,18 @@ fun FloatingPopUpView(
 
     Surface(
         shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.surface,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = windowAlpha.coerceIn(0.25f, 1.0f)),
         tonalElevation = 8.dp,
-        shadowElevation = 24.dp,
+        shadowElevation = (24 * windowAlpha).dp,
         modifier = Modifier
             .fillMaxSize()
-            .shadow(20.dp, RoundedCornerShape(22.dp))
+            .graphicsLayer {
+                alpha = windowAlpha
+            }
+            .shadow((20 * windowAlpha).dp, RoundedCornerShape(22.dp))
             .border(
                 1.5.dp,
-                MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                MaterialTheme.colorScheme.outline.copy(alpha = (0.35f * windowAlpha).coerceAtLeast(0.15f)),
                 RoundedCornerShape(22.dp)
             )
             .testTag("floating_popup_window")
@@ -209,12 +219,40 @@ fun FloatingPopUpView(
                             color = MaterialTheme.colorScheme.onSurface
                         )
 
-                        Icon(
-                            imageVector = Icons.Default.DragHandle,
-                            contentDescription = "Drag Window",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                            modifier = Modifier.size(18.dp)
-                        )
+                        // The two lines (=) icon requested by user to toggle transparency controls
+                        Surface(
+                            onClick = {
+                                isTransparencySliderOpen = !isTransparencySliderOpen
+                            },
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (isTransparencySliderOpen) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                            modifier = Modifier
+                                .testTag("popup_transparency_toggle_button")
+                                .padding(horizontal = 2.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DragHandle,
+                                    contentDescription = "Adjust Transparency",
+                                    tint = if (isTransparencySliderOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                if (windowAlpha < 0.98f) {
+                                    Text(
+                                        text = "${(windowAlpha * 100).toInt()}%",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = if (isTransparencySliderOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                                        modifier = Modifier.padding(start = 2.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     // Window Control Actions: Clear Chat | Minimize | Maximize | Close
@@ -282,6 +320,132 @@ fun FloatingPopUpView(
                                 modifier = Modifier.size(16.dp),
                                 tint = MaterialTheme.colorScheme.error
                             )
+                        }
+                    }
+                }
+
+                // Interactive Transparency Slider Panel (Toggled via the = two lines icon)
+                AnimatedVisibility(visible = isTransparencySliderOpen) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f),
+                        shape = RoundedCornerShape(0.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(
+                                width = 1.dp,
+                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                            )
+                            .testTag("popup_transparency_panel")
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Tune,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "Window Transparency (Aar-paar dikhega)",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                Text(
+                                    text = "${(windowAlpha * 100).toInt()}% Opacity",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(2.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "25%",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                )
+
+                                Slider(
+                                    value = windowAlpha,
+                                    onValueChange = { 
+                                        windowAlpha = it
+                                        onAlphaChanged(it)
+                                    },
+                                    valueRange = 0.25f..1.0f,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("popup_transparency_slider"),
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = MaterialTheme.colorScheme.primary,
+                                        activeTrackColor = MaterialTheme.colorScheme.primary,
+                                        inactiveTrackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                                    )
+                                )
+
+                                Text(
+                                    text = "100%",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                )
+                            }
+
+                            // Quick Preset Buttons
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val presets = listOf(
+                                    "100% Solid" to 1.0f,
+                                    "75%" to 0.75f,
+                                    "50% Half" to 0.50f,
+                                    "30% Ghost" to 0.30f
+                                )
+                                presets.forEach { (label, value) ->
+                                    val isSelected = kotlin.math.abs(windowAlpha - value) < 0.05f
+                                    Surface(
+                                        onClick = { 
+                                            windowAlpha = value
+                                            onAlphaChanged(value)
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                                        border = if (isSelected) null else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier.padding(vertical = 4.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                fontSize = 10.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

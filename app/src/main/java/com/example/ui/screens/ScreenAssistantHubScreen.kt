@@ -1,7 +1,9 @@
 package com.example.ui.screens
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -9,6 +11,10 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -84,6 +90,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -120,6 +127,10 @@ fun ScreenAssistantHubScreen(
     val context = LocalContext.current
     var hasOverlayPermission by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
     var isServiceRunning by remember { mutableStateOf(FloatingAssistantService.isRunning()) }
+    var isAccessibilityEnabled by remember {
+        mutableStateOf(com.example.service.OmniAccessibilityService.isAccessibilityEnabled(context))
+    }
+
     val adminSettings by viewModel.adminSettings.collectAsState()
 
     var customTextDraft by remember(adminSettings.bubbleText) {
@@ -134,10 +145,19 @@ fun ScreenAssistantHubScreen(
         }
     }
 
-    // Re-check overlay permission when screen resumes
-    LaunchedEffect(Unit) {
-        hasOverlayPermission = Settings.canDrawOverlays(context)
-        isServiceRunning = FloatingAssistantService.isRunning()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasOverlayPermission = Settings.canDrawOverlays(context)
+                isServiceRunning = FloatingAssistantService.isRunning()
+                isAccessibilityEnabled = com.example.service.OmniAccessibilityService.isAccessibilityEnabled(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     Scaffold(
@@ -292,6 +312,8 @@ fun ScreenAssistantHubScreen(
                             }
                         }
                     }
+
+
                 }
             }
 
@@ -356,11 +378,11 @@ fun ScreenAssistantHubScreen(
                         // Badge / Status
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.tertiaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                            color = if (isAccessibilityEnabled) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor = if (isAccessibilityEnabled) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onTertiaryContainer
                         ) {
                             Text(
-                                text = "100% SAFE",
+                                text = if (isAccessibilityEnabled) "ZERO-POPUP ACTIVE" else "READY",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -369,10 +391,72 @@ fun ScreenAssistantHubScreen(
                     }
 
                     Text(
-                        text = "🔒 Google Play Protect सुरक्षित: ऐप में किसी भी जोखिम भरी Accessibility परमिशन के बिना सुरक्षित ऑन-डिवाइस स्क्रीन कैप्चर और AI OCR तकनीक का इस्तेमाल होता है।",
+                        text = "🚀 बिना किसी 'Start Recording' पॉपअप के डायरेक्ट स्क्रीन क्रॉप और सॉल्यूशन पाने के लिए Accessibility ऑन करें। इससे आप जब भी क्रॉप करेंगे, बिना किसी परमिशन डायलॉग के सीधे स्क्रीनशॉट कट जाएगा!",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (isAccessibilityEnabled) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surface,
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (isAccessibilityEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Icon(
+                                        imageVector = if (isAccessibilityEnabled) Icons.Default.CheckCircle else Icons.Default.Security,
+                                        contentDescription = null,
+                                        tint = if (isAccessibilityEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = if (isAccessibilityEnabled) "Zero-Dialog Direct Mode: Active" else "Direct Screen Crop (No Popup)",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = if (isAccessibilityEnabled)
+                                        "Recording dialogs are completely disabled. Instant crop works directly."
+                                    else
+                                        "Enable OmniAI in Settings to permanently remove 'Start recording or casting' popups.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(
+                                onClick = {
+                                    try {
+                                        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        context.startActivity(intent)
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Could not open Accessibility settings", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isAccessibilityEnabled) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primary,
+                                    contentColor = if (isAccessibilityEnabled) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onPrimary
+                                )
+                            ) {
+                                Text(if (isAccessibilityEnabled) "Settings" else "Enable")
+                            }
+                        }
+                    }
 
                     Surface(
                         shape = RoundedCornerShape(12.dp),
@@ -388,15 +472,15 @@ fun ScreenAssistantHubScreen(
                                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                             )
                             Text(
-                                text = "• ⚡ Full Screen Scan: पूरी स्क्रीन का AI विश्लेषण और सवाल हल।",
+                                text = "• ⚡ Direct Crop: स्क्रीन पर बॉक्स बनाते ही बिना किसी परमिशन के तुरंत क्रॉप!",
                                 style = MaterialTheme.typography.bodySmall
                             )
                             Text(
-                                text = "• ✂️ Crop Area: मनपसंद हिस्सा क्रॉप करें — क्रॉप इमेज चैट में दिखेगी!",
+                                text = "• 📋 OCR Text Grabber: स्क्रीन के किसी भी हिस्से से टेक्स्ट तुरंत निकालें।",
                                 style = MaterialTheme.typography.bodySmall
                             )
                             Text(
-                                text = "• 📋 OCR Text Grabber: स्क्रीन के किसी भी हिस्से से टेक्स्ट कॉपी और ट्रांसलेट करें।",
+                                text = "• 🚀 Quick HUD: स्क्रीन पर तैरता हुआ तुरंत हल कार्ड।",
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }

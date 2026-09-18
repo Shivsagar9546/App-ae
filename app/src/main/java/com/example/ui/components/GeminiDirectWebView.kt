@@ -19,6 +19,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.browser.customtabs.CustomTabsIntent
@@ -133,11 +134,16 @@ fun GeminiDirectWebView(
 
     // File upload callback for Gemini Web attachments
     var filePathCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
-    val fileChooserLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetMultipleContents()
-    ) { uris: List<Uri> ->
-        filePathCallback?.onReceiveValue(uris.toTypedArray())
-        filePathCallback = null
+    val activityResultOwner = LocalActivityResultRegistryOwner.current
+    val fileChooserLauncher = if (activityResultOwner != null) {
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.GetMultipleContents()
+        ) { uris: List<Uri> ->
+            filePathCallback?.onReceiveValue(uris.toTypedArray())
+            filePathCallback = null
+        }
+    } else {
+        null
     }
 
     DisposableEffect(webViewInstance) {
@@ -402,9 +408,14 @@ fun GeminiDirectWebView(
                                 fileChooserParams: FileChooserParams?
                             ): Boolean {
                                 filePathCallback?.onReceiveValue(null)
-                                filePathCallback = callback
-                                fileChooserLauncher.launch("*/*")
-                                return true
+                                if (fileChooserLauncher != null) {
+                                    filePathCallback = callback
+                                    fileChooserLauncher.launch("*/*")
+                                    return true
+                                } else {
+                                    callback?.onReceiveValue(null)
+                                    return false
+                                }
                             }
 
                             override fun onPermissionRequest(request: PermissionRequest?) {

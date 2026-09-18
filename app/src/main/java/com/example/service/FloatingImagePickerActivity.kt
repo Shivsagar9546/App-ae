@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -16,11 +17,21 @@ import androidx.core.content.ContextCompat
 @android.annotation.SuppressLint("InvalidFragmentVersionForActivityResult")
 class FloatingImagePickerActivity : ComponentActivity() {
 
+    private fun safeFinish() {
+        finish()
+        if (Build.VERSION.SDK_INT >= 34) {
+            overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0)
+        } else {
+            @Suppress("DEPRECATION")
+            overridePendingTransition(0, 0)
+        }
+    }
+
     private val getContentLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         handleImageUri(uri)
-        finish()
+        safeFinish()
     }
 
     private val pickVisualMediaLauncher = registerForActivityResult(
@@ -28,10 +39,10 @@ class FloatingImagePickerActivity : ComponentActivity() {
     ) { uri: Uri? ->
         if (uri != null) {
             handleImageUri(uri)
-            finish()
+            safeFinish()
         } else {
             // Fallback to GetContent if cancelled or empty
-            finish()
+            safeFinish()
         }
     }
 
@@ -43,11 +54,11 @@ class FloatingImagePickerActivity : ComponentActivity() {
                 takePhotoLauncher.launch(null)
             } catch (e: Exception) {
                 Toast.makeText(this, "Camera not available: ${e.message}", Toast.LENGTH_SHORT).show()
-                finish()
+                safeFinish()
             }
         } else {
             Toast.makeText(this, "Camera permission needed to take photos", Toast.LENGTH_SHORT).show()
-            finish()
+            safeFinish()
         }
     }
 
@@ -58,7 +69,7 @@ class FloatingImagePickerActivity : ComponentActivity() {
             val scaled = scaleDownBitmap(bitmap, 1280)
             onImageSelectedCallback?.invoke(scaled)
         }
-        finish()
+        safeFinish()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -71,7 +82,7 @@ class FloatingImagePickerActivity : ComponentActivity() {
                         takePhotoLauncher.launch(null)
                     } catch (e: Exception) {
                         Toast.makeText(this, "Cannot open camera: ${e.message}", Toast.LENGTH_SHORT).show()
-                        finish()
+                        safeFinish()
                     }
                 } else {
                     requestCameraPermissionLauncher.launch(Manifest.permission.CAMERA)
@@ -89,7 +100,7 @@ class FloatingImagePickerActivity : ComponentActivity() {
                         getContentLauncher.launch("image/*")
                     } catch (e2: Exception) {
                         Toast.makeText(this, "No image picker available: ${e2.localizedMessage}", Toast.LENGTH_SHORT).show()
-                        finish()
+                        safeFinish()
                     }
                 }
             }
@@ -98,7 +109,7 @@ class FloatingImagePickerActivity : ComponentActivity() {
 
     private fun handleImageUri(uri: Uri?) {
         if (uri == null) {
-            finish()
+            safeFinish()
             return
         }
         try {
@@ -140,7 +151,7 @@ class FloatingImagePickerActivity : ComponentActivity() {
         } catch (t: Throwable) {
             Toast.makeText(this, "Error loading image: ${t.localizedMessage}", Toast.LENGTH_SHORT).show()
         } finally {
-            finish()
+            safeFinish()
         }
     }
 
@@ -173,7 +184,7 @@ class FloatingImagePickerActivity : ComponentActivity() {
             onImageSelectedCallback = onPicked
             val intent = Intent(context, FloatingImagePickerActivity::class.java).apply {
                 putExtra(EXTRA_MODE, MODE_GALLERY)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
             }
             context.startActivity(intent)
         }
@@ -182,7 +193,7 @@ class FloatingImagePickerActivity : ComponentActivity() {
             onImageSelectedCallback = onPicked
             val intent = Intent(context, FloatingImagePickerActivity::class.java).apply {
                 putExtra(EXTRA_MODE, MODE_CAMERA)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
             }
             context.startActivity(intent)
         }

@@ -206,16 +206,56 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification: Notification = NotificationCompat.Builder(this, OmniAIApplication.CHANNEL_FLOATING_SERVICE)
-            .setContentTitle("OmniAI Assistant Active")
-            .setContentText("Tap to open full app or use floating tools over other apps")
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentIntent(pendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Close Assistant", stopPendingIntent)
-            .setOngoing(true)
-            .build()
+        val notification = createForegroundNotification()
 
         try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            try {
+                startForeground(NOTIFICATION_ID, notification)
+            } catch (e2: Exception) {}
+        }
+    }
+
+    private fun createForegroundNotification(): Notification {
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val stopIntent = Intent(this, FloatingAssistantService::class.java).apply {
+            action = ACTION_STOP_SERVICE
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this,
+            1,
+            stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        return NotificationCompat.Builder(this, OmniAIApplication.CHANNEL_FLOATING_SERVICE)
+            .setContentTitle("OmniAI Assistant")
+            .setContentText("Background assistant active")
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setSilent(true)
+            .setOngoing(true)
+            .build()
+    }
+
+    fun promoteToMediaProjectionFgs() {
+        try {
+            val notification = createForegroundNotification()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 startForeground(
                     NOTIFICATION_ID,
@@ -229,13 +269,44 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                     notification,
                     android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
                 )
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("FloatingService", "Could not promote to mediaProjection FGS", e)
+        }
+    }
+
+    fun demoteFromMediaProjectionFgs() {
+        try {
+            val notification = createForegroundNotification()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
         } catch (e: Exception) {
+            android.util.Log.w("FloatingService", "Could not demote from mediaProjection FGS", e)
+        }
+    }
+
+    private fun safelyRemoveView(viewToRemove: View?) {
+        if (viewToRemove == null) return
+        try {
+            viewToRemove.visibility = View.GONE
+        } catch (e: Exception) {}
+        viewToRemove.post {
             try {
-                startForeground(NOTIFICATION_ID, notification)
-            } catch (e2: Exception) {}
+                if (viewToRemove.isAttachedToWindow) {
+                    windowManager.removeView(viewToRemove)
+                }
+            } catch (e: Exception) {
+                try {
+                    windowManager.removeViewImmediate(viewToRemove)
+                } catch (e2: Exception) {}
+            }
         }
     }
 
@@ -527,6 +598,14 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                                     windowManager.updateViewLayout(popupView, popupParams)
                                 } catch (e: Exception) {}
                             }
+                        },
+                        onAlphaChanged = { newAlpha ->
+                            popupParams?.let { params ->
+                                params.alpha = newAlpha.coerceIn(0.25f, 1.0f)
+                                try {
+                                    windowManager.updateViewLayout(popupView, params)
+                                } catch (e: Exception) {}
+                            }
                         }
                     )
                 }
@@ -556,12 +635,9 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     }
 
     fun hidePopup() {
-        if (popupView != null) {
-            try {
-                windowManager.removeView(popupView)
-            } catch (e: Exception) {}
-            popupView = null
-        }
+        val view = popupView
+        popupView = null
+        safelyRemoveView(view)
     }
 
     // ==========================================
@@ -656,12 +732,9 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     }
 
     fun hideOcrGrabber() {
-        if (ocrView != null) {
-            try {
-                windowManager.removeView(ocrView)
-            } catch (e: Exception) {}
-            ocrView = null
-        }
+        val view = ocrView
+        ocrView = null
+        safelyRemoveView(view)
     }
 
     fun startOcrTextExtraction(cropRect: Rect?) {
@@ -672,11 +745,45 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         _ocrExtractedText.value = null
 
         serviceScope.launch {
+            // Check if zero-dialog Accessibility capture is available
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && OmniAccessibilityService.isServiceRunning()) {
+                kotlinx.coroutines.delay(100)
+                val bitmap = OmniAccessibilityService.captureScreen(cropRect)
+                showOcrGrabber()
+
+                if (bitmap != null) {
+                    val prompt = "Extract all readable text, questions, options, captions, or paragraphs visible in this image accurately. Return only the extracted text line by line."
+                    val result = withContext(Dispatchers.IO) {
+                        aiRepository.askAi(
+                            messages = listOf(AiMessage(role = "user", text = prompt)),
+                            imageBitmap = bitmap,
+                            isScreenScan = true
+                        )
+                    }
+                    _isOcrLoading.value = false
+                    when (result) {
+                        is AiResult.Success -> {
+                            _ocrExtractedText.value = result.text.trim()
+                        }
+                        is AiResult.Error -> {
+                            _ocrExtractedText.value = "Failed to extract text: ${result.message}"
+                        }
+                    }
+                } else {
+                    _isOcrLoading.value = false
+                    Toast.makeText(this@FloatingAssistantService, "Screen capture failed", Toast.LENGTH_SHORT).show()
+                }
+                return@launch
+            }
+
+            // Fallback to standard permission
             ScreenCapturePermissionActivity.requestPermission(
                 context = this@FloatingAssistantService,
                 onGranted = { resultCode, data ->
+                    promoteToMediaProjectionFgs()
                     serviceScope.launch {
                         val bitmap = screenCaptureHelper.captureFrame(resultCode, data, cropRect)
+                        demoteFromMediaProjectionFgs()
                         showOcrGrabber()
 
                         if (bitmap != null) {
@@ -799,12 +906,9 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     }
 
     fun hideQuickHud() {
-        if (hudView != null) {
-            try {
-                windowManager.removeView(hudView)
-            } catch (e: Exception) {}
-            hudView = null
-        }
+        val view = hudView
+        hudView = null
+        safelyRemoveView(view)
     }
 
     fun startQuickHudSolve(cropRect: Rect?) {
@@ -816,11 +920,47 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         _hudTitle.value = "Solving Screen..."
 
         serviceScope.launch {
+            // Check if zero-dialog Accessibility capture is available
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && OmniAccessibilityService.isServiceRunning()) {
+                kotlinx.coroutines.delay(100)
+                val bitmap = OmniAccessibilityService.captureScreen(cropRect)
+                showQuickHud()
+
+                if (bitmap != null) {
+                    val prompt = "Give a concise, direct, accurate solution / answer and key steps for the question/problem visible on this screen. Be clear and quick."
+                    val result = withContext(Dispatchers.IO) {
+                        aiRepository.askAi(
+                            messages = listOf(AiMessage(role = "user", text = prompt)),
+                            imageBitmap = bitmap,
+                            isScreenScan = true
+                        )
+                    }
+                    _isHudLoading.value = false
+                    when (result) {
+                        is AiResult.Success -> {
+                            _hudTitle.value = "Instant Solution"
+                            _hudSolutionText.value = result.text.trim()
+                        }
+                        is AiResult.Error -> {
+                            _hudTitle.value = "Error Solving"
+                            _hudSolutionText.value = "⚠️ ${result.message}"
+                        }
+                    }
+                } else {
+                    _isHudLoading.value = false
+                    Toast.makeText(this@FloatingAssistantService, "Screen capture failed", Toast.LENGTH_SHORT).show()
+                }
+                return@launch
+            }
+
+            // Fallback to standard permission
             ScreenCapturePermissionActivity.requestPermission(
                 context = this@FloatingAssistantService,
                 onGranted = { resultCode, data ->
+                    promoteToMediaProjectionFgs()
                     serviceScope.launch {
                         val bitmap = screenCaptureHelper.captureFrame(resultCode, data, cropRect)
+                        demoteFromMediaProjectionFgs()
                         showQuickHud()
 
                         if (bitmap != null) {
@@ -888,7 +1028,9 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
             layoutFlag,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT
         )
 
@@ -919,12 +1061,9 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     }
 
     fun hideCropOverlay() {
-        if (cropOverlayView != null) {
-            try {
-                windowManager.removeView(cropOverlayView)
-            } catch (e: Exception) {}
-            cropOverlayView = null
-        }
+        val view = cropOverlayView
+        cropOverlayView = null
+        safelyRemoveView(view)
     }
 
     // ==========================================
@@ -933,26 +1072,60 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
 
     /**
      * Reads screen text directly using fast on-device screen capture and OCR text extraction.
-     * 100% Safe, zero risky accessibility permissions required.
      */
     fun startInstantTextScan() {
         startOcrTextExtraction(cropRect = null)
     }
 
+    /**
+     * Captures the screen (or cropped region) and analyzes it with AI.
+     * Uses OmniAccessibilityService for instant 100% zero-dialog captures.
+     * Falls back to standard MediaProjection if accessibility service is not yet enabled.
+     */
     fun startScreenScan(cropRect: Rect?) {
-        _statusText.value = "Preparing Screen Scan..."
+        _statusText.value = "Preparing Screen Capture..."
         hidePopup()
         hideBubble()
         hideOcrGrabber()
         hideQuickHud()
 
         serviceScope.launch {
+            // Check if zero-dialog Accessibility capture is available
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && OmniAccessibilityService.isServiceRunning()) {
+                _statusText.value = "Capturing screen area..."
+                // Small delay to let overlay views fully disappear before snapping
+                kotlinx.coroutines.delay(100)
+                val bitmap = OmniAccessibilityService.captureScreen(cropRect)
+                showPopup()
+
+                if (bitmap != null) {
+                    _statusText.value = "Analyzing screen with AI..."
+                    sendScreenAnalysisRequest(bitmap, prompt = "Scan and solve/explain this screen content accurately.")
+                } else {
+                    _statusText.value = null
+                    Toast.makeText(this@FloatingAssistantService, "Could not capture screen area", Toast.LENGTH_SHORT).show()
+                }
+                return@launch
+            }
+
+            // If accessibility is not turned on in system settings, explain or fallback
+            if (!OmniAccessibilityService.isAccessibilityEnabled(this@FloatingAssistantService)) {
+                Toast.makeText(
+                    this@FloatingAssistantService,
+                    "Tip: Enable OmniAI in Accessibility Settings to eliminate all recording popups!",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+
+            // Fallback to MediaProjection
             ScreenCapturePermissionActivity.requestPermission(
                 context = this@FloatingAssistantService,
                 onGranted = { resultCode, data ->
+                    promoteToMediaProjectionFgs()
                     serviceScope.launch {
                         _statusText.value = "Capturing screen..."
                         val bitmap = screenCaptureHelper.captureFrame(resultCode, data, cropRect)
+                        demoteFromMediaProjectionFgs()
                         showPopup()
 
                         if (bitmap != null) {

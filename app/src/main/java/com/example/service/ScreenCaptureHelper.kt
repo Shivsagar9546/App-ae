@@ -61,6 +61,7 @@ class ScreenCaptureHelper(private val context: Context) {
             try {
                 mediaProjection = projectionManager.getMediaProjection(resultCode, data)
                 if (mediaProjection == null) {
+                    ScreenCapturePermissionActivity.clearCachedPermission()
                     if (isResumed.compareAndSet(false, true)) {
                         continuation.resume(null)
                     }
@@ -115,10 +116,17 @@ class ScreenCaptureHelper(private val context: Context) {
 
                             // If user selected a specific area rectangle, crop to that area
                             val croppedBitmap = if (cropRect != null && cropRect.width() > 10 && cropRect.height() > 10) {
-                                val left = cropRect.left.coerceIn(0, width - 1)
-                                val top = cropRect.top.coerceIn(0, height - 1)
-                                val cropW = cropRect.width().coerceIn(1, width - left)
-                                val cropH = cropRect.height().coerceIn(1, height - top)
+                                // Scale cropRect if captured bitmap size differs from metrics
+                                val scaleX = cleanBitmap.width.toFloat() / width.toFloat()
+                                val scaleY = cleanBitmap.height.toFloat() / height.toFloat()
+
+                                val left = (cropRect.left * scaleX).toInt().coerceIn(0, cleanBitmap.width - 1)
+                                val top = (cropRect.top * scaleY).toInt().coerceIn(0, cleanBitmap.height - 1)
+                                val right = (cropRect.right * scaleX).toInt().coerceIn(left + 1, cleanBitmap.width)
+                                val bottom = (cropRect.bottom * scaleY).toInt().coerceIn(top + 1, cleanBitmap.height)
+                                val cropW = (right - left).coerceAtLeast(1)
+                                val cropH = (bottom - top).coerceAtLeast(1)
+
                                 val cropped = Bitmap.createBitmap(cleanBitmap, left, top, cropW, cropH)
                                 if (cleanBitmap != cropped) {
                                     cleanBitmap.recycle()
@@ -179,6 +187,7 @@ class ScreenCaptureHelper(private val context: Context) {
 
             } catch (e: Exception) {
                 android.util.Log.e("ScreenCaptureHelper", "Error starting projection", e)
+                ScreenCapturePermissionActivity.clearCachedPermission()
                 cleanup()
                 if (isResumed.compareAndSet(false, true) && continuation.isActive) {
                     continuation.resume(null)

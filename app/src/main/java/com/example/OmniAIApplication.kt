@@ -30,7 +30,13 @@ class OmniAIApplication : Application() {
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             android.util.Log.e("OmniAI", "Uncaught exception on thread ${thread.name}", throwable)
-            defaultHandler?.uncaughtException(thread, throwable)
+            val msg = throwable.message ?: ""
+            val isOverlayGlitch = throwable is android.view.WindowManager.BadTokenException ||
+                    (throwable is IllegalArgumentException && (msg.contains("not attached") || msg.contains("View="))) ||
+                    (throwable is IllegalStateException && msg.contains("ActivityResultRegistryOwner"))
+            if (!isOverlayGlitch) {
+                defaultHandler?.uncaughtException(thread, throwable)
+            }
         }
     }
 
@@ -52,10 +58,12 @@ class OmniAIApplication : Application() {
             val channel = NotificationChannel(
                 CHANNEL_FLOATING_SERVICE,
                 "Floating Assistant Service",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_MIN
             ).apply {
-                description = "Shows persistent status while Floating AI Assistant is active"
+                description = "Silent internal channel for background overlay service"
                 setShowBadge(false)
+                enableLights(false)
+                enableVibration(false)
             }
 
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

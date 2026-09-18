@@ -2,16 +2,12 @@ package com.example.ui.screens
 
 import android.graphics.Rect
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -22,9 +18,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CropFree
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -38,13 +36,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.max
@@ -57,91 +57,107 @@ fun SelectedAreaCropOverlay(
 ) {
     var startOffset by remember { mutableStateOf<Offset?>(null) }
     var currentOffset by remember { mutableStateOf<Offset?>(null) }
+    var overlayWindowOffset by remember { mutableStateOf(Offset.Zero) }
+    var overlaySize by remember { mutableStateOf(IntSize.Zero) }
+    val context = LocalContext.current
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
-                detectDragGestures(
-                    onDragStart = { offset ->
-                        startOffset = offset
-                        currentOffset = offset
-                    },
-                    onDrag = { change, _ ->
-                        change.consume()
-                        currentOffset = change.position
-                    },
-                    onDragEnd = {
-                        // Keep current selection
-                    }
-                )
+            .onGloballyPositioned { coordinates ->
+                overlayWindowOffset = coordinates.positionInWindow()
+                overlaySize = coordinates.size
             }
             .testTag("area_crop_overlay")
     ) {
-        // Draw dimmed canvas with transparent cutout rectangle
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val start = startOffset
-            val end = currentOffset
-
-            // Draw semi-transparent dark backdrop
-            drawRect(
-                color = Color(0x99000000),
-                size = size
-            )
-
-            if (start != null && end != null) {
-                val left = min(start.x, end.x)
-                val top = min(start.y, end.y)
-                val right = max(start.x, end.x)
-                val bottom = max(start.y, end.y)
-                val rectWidth = right - left
-                val rectHeight = bottom - top
-
-                if (rectWidth > 10 && rectHeight > 10) {
-                    // Cut out selected area
-                    drawRect(
-                        color = Color.Transparent,
-                        topLeft = Offset(left, top),
-                        size = Size(rectWidth, rectHeight),
-                        blendMode = BlendMode.Clear
+        // 1. Transparent Gesture Detection & High-Performance Drawing Canvas
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            startOffset = offset
+                            currentOffset = offset
+                        },
+                        onDrag = { change, _ ->
+                            change.consume()
+                            currentOffset = change.position
+                        }
                     )
+                }
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val start = startOffset
+                val end = currentOffset
+                val scrimColor = Color(0x99000000)
 
-                    // Glowing bounding box border
-                    drawRect(
-                        color = Color(0xFF6366F1),
-                        topLeft = Offset(left, top),
-                        size = Size(rectWidth, rectHeight),
-                        style = Stroke(width = 3.dp.toPx())
-                    )
+                if (start != null && end != null) {
+                    val left = min(start.x, end.x).coerceAtLeast(0f)
+                    val top = min(start.y, end.y).coerceAtLeast(0f)
+                    val right = max(start.x, end.x).coerceIn(left, size.width)
+                    val bottom = max(start.y, end.y).coerceIn(top, size.height)
+                    val rectW = right - left
+                    val rectH = bottom - top
 
-                    // Corner indicators
-                    val cornerLen = 20.dp.toPx()
-                    val strokeW = 5.dp.toPx()
-                    // Top-Left
-                    drawLine(Color(0xFF38BDF8), Offset(left, top), Offset(left + cornerLen, top), strokeW)
-                    drawLine(Color(0xFF38BDF8), Offset(left, top), Offset(left, top + cornerLen), strokeW)
-                    // Top-Right
-                    drawLine(Color(0xFF38BDF8), Offset(right, top), Offset(right - cornerLen, top), strokeW)
-                    drawLine(Color(0xFF38BDF8), Offset(right, top), Offset(right, top + cornerLen), strokeW)
-                    // Bottom-Left
-                    drawLine(Color(0xFF38BDF8), Offset(left, bottom), Offset(left + cornerLen, bottom), strokeW)
-                    drawLine(Color(0xFF38BDF8), Offset(left, bottom), Offset(left, bottom - cornerLen), strokeW)
-                    // Bottom-Right
-                    drawLine(Color(0xFF38BDF8), Offset(right, bottom), Offset(right - cornerLen, bottom), strokeW)
-                    drawLine(Color(0xFF38BDF8), Offset(right, bottom), Offset(right, bottom - cornerLen), strokeW)
+                    if (rectW > 15f && rectH > 15f) {
+                        // Four outer scrim rectangles to cleanly frame transparent crop area without BlendMode.Clear crashes
+                        if (top > 0f) {
+                            drawRect(color = scrimColor, topLeft = Offset(0f, 0f), size = Size(size.width, top))
+                        }
+                        if (size.height > bottom) {
+                            drawRect(color = scrimColor, topLeft = Offset(0f, bottom), size = Size(size.width, size.height - bottom))
+                        }
+                        if (left > 0f) {
+                            drawRect(color = scrimColor, topLeft = Offset(0f, top), size = Size(left, rectH))
+                        }
+                        if (size.width > right) {
+                            drawRect(color = scrimColor, topLeft = Offset(right, top), size = Size(size.width - right, rectH))
+                        }
+
+                        // Vibrant Bounding Box
+                        drawRect(
+                            color = Color(0xFF6366F1),
+                            topLeft = Offset(left, top),
+                            size = Size(rectW, rectH),
+                            style = Stroke(width = 3.dp.toPx())
+                        )
+
+                        // 4 High-visibility Corner Brackets
+                        val cornerLen = 22.dp.toPx()
+                        val strokeW = 5.dp.toPx()
+                        val cyan = Color(0xFF38BDF8)
+                        // Top-Left
+                        drawLine(cyan, Offset(left, top), Offset(left + cornerLen, top), strokeW)
+                        drawLine(cyan, Offset(left, top), Offset(left, top + cornerLen), strokeW)
+                        // Top-Right
+                        drawLine(cyan, Offset(right, top), Offset(right - cornerLen, top), strokeW)
+                        drawLine(cyan, Offset(right, top), Offset(right, top + cornerLen), strokeW)
+                        // Bottom-Left
+                        drawLine(cyan, Offset(left, bottom), Offset(left + cornerLen, bottom), strokeW)
+                        drawLine(cyan, Offset(left, bottom), Offset(left, bottom - cornerLen), strokeW)
+                        // Bottom-Right
+                        drawLine(cyan, Offset(right, bottom), Offset(right - cornerLen, bottom), strokeW)
+                        drawLine(cyan, Offset(right, bottom), Offset(right, bottom - cornerLen), strokeW)
+                    } else {
+                        drawRect(color = scrimColor, size = size)
+                    }
+                } else {
+                    drawRect(color = scrimColor, size = size)
                 }
             }
         }
 
-        // Top instruction pill
+        // 2. Top instruction pill
         Surface(
             shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
             tonalElevation = 6.dp,
+            shadowElevation = 8.dp,
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .statusBarsPadding()
-                .padding(top = 20.dp)
+                .padding(top = 24.dp)
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
@@ -155,22 +171,39 @@ fun SelectedAreaCropOverlay(
                     modifier = Modifier.size(18.dp)
                 )
                 Text(
-                    text = "Drag finger over question or area to scan",
+                    text = if (startOffset != null && currentOffset != null) "Area selected! Tap Scan below" else "Drag finger over question or area",
                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
+                if (startOffset != null) {
+                    IconButton(
+                        onClick = {
+                            startOffset = null
+                            currentOffset = null
+                        },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Reset Selection",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
             }
         }
 
-        // Bottom action buttons
+        // 3. Bottom action buttons (placed on top layer so they are 100% clickable)
         Surface(
             shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
-            tonalElevation = 6.dp,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
+            tonalElevation = 8.dp,
+            shadowElevation = 12.dp,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = 30.dp, start = 20.dp, end = 20.dp)
+                .padding(bottom = 32.dp, start = 20.dp, end = 20.dp)
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
@@ -196,16 +229,41 @@ fun SelectedAreaCropOverlay(
                         val start = startOffset
                         val end = currentOffset
                         if (start != null && end != null) {
-                            val left = min(start.x, end.x).toInt()
-                            val top = min(start.y, end.y).toInt()
-                            val right = max(start.x, end.x).toInt()
-                            val bottom = max(start.y, end.y).toInt()
-                            if (right - left > 20 && bottom - top > 20) {
-                                onAreaSelected(Rect(left, top, right, bottom))
+                            val selLeft = min(start.x, end.x) + overlayWindowOffset.x
+                            val selTop = min(start.y, end.y) + overlayWindowOffset.y
+                            val selRight = max(start.x, end.x) + overlayWindowOffset.x
+                            val selBottom = max(start.y, end.y) + overlayWindowOffset.y
+
+                            val selWidth = selRight - selLeft
+                            val selHeight = selBottom - selTop
+
+                            if (selWidth > 20f && selHeight > 20f) {
+                                // Obtain actual display pixel metrics for accurate scaling
+                                val wm = context.getSystemService(android.content.Context.WINDOW_SERVICE) as? android.view.WindowManager
+                                val displayMetrics = android.util.DisplayMetrics()
+                                @Suppress("DEPRECATION")
+                                wm?.defaultDisplay?.getRealMetrics(displayMetrics)
+                                val realDisplayW = displayMetrics.widthPixels
+                                val realDisplayH = displayMetrics.heightPixels
+
+                                val finalRect = if (overlaySize.width > 0 && overlaySize.height > 0 && realDisplayW > 0 && realDisplayH > 0) {
+                                    val scaleX = realDisplayW.toFloat() / overlaySize.width.toFloat()
+                                    val scaleY = realDisplayH.toFloat() / overlaySize.height.toFloat()
+
+                                    val pxLeft = (selLeft * scaleX).toInt().coerceIn(0, realDisplayW - 1)
+                                    val pxTop = (selTop * scaleY).toInt().coerceIn(0, realDisplayH - 1)
+                                    val pxRight = (selRight * scaleX).toInt().coerceIn(pxLeft + 1, realDisplayW)
+                                    val pxBottom = (selBottom * scaleY).toInt().coerceIn(pxTop + 1, realDisplayH)
+                                    Rect(pxLeft, pxTop, pxRight, pxBottom)
+                                } else {
+                                    Rect(selLeft.toInt(), selTop.toInt(), selRight.toInt(), selBottom.toInt())
+                                }
+
+                                onAreaSelected(finalRect)
                                 return@Button
                             }
                         }
-                        // Default to full screen scan if no rectangle was drawn
+                        // Fallback to full screen if minimal area selected
                         onAreaSelected(null)
                     },
                     shape = RoundedCornerShape(16.dp),
@@ -220,7 +278,7 @@ fun SelectedAreaCropOverlay(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Scan Selected Area", fontWeight = FontWeight.Bold)
+                    Text("Scan Area", fontWeight = FontWeight.Bold)
                 }
             }
         }
