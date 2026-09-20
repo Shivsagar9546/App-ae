@@ -220,8 +220,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 else -> "OmniAI is thinking..."
             }
 
-            // Quick downsample first image to base64 for persistent chat history display in background
-            val imageBase64 = withContext(Dispatchers.Default) {
+            // Quick downsample first image to local cache file for persistent chat history display
+            val imageBase64 = withContext(Dispatchers.IO) {
                 primaryImage?.let { bmp ->
                     try {
                         val maxDim = 800
@@ -232,9 +232,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             val newH = if (bmp.width > bmp.height) (maxDim / ratio).toInt() else maxDim
                             scaled = Bitmap.createScaledBitmap(bmp, newW.coerceAtLeast(1), newH.coerceAtLeast(1), true)
                         }
-                        val stream = ByteArrayOutputStream()
-                        scaled.compress(Bitmap.CompressFormat.JPEG, 70, stream)
-                        Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
+                        val cacheFile = java.io.File(getApplication<Application>().cacheDir, "img_${java.util.UUID.randomUUID()}.jpg")
+                        java.io.FileOutputStream(cacheFile).use { fos ->
+                            scaled.compress(Bitmap.CompressFormat.JPEG, 70, fos)
+                        }
+                        if (scaled != bmp) {
+                            scaled.recycle()
+                        }
+                        cacheFile.absolutePath
                     } catch (e: Exception) {
                         null
                     }
@@ -285,6 +290,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 imageBitmaps = images,
                 isScreenScan = isScan
             )
+            images.forEach { it.recycle() }
 
             _isGenerating.value = false
             _statusMessage.value = null

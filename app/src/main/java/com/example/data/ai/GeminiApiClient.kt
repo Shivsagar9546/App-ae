@@ -102,7 +102,26 @@ class GeminiApiClient {
                         else emptyList()
                     }
 
-                    messageImages.forEach { imgData ->
+                    val resolvedImages = messageImages.mapNotNull { imgData ->
+                        if (imgData.isNotBlank() && (imgData.startsWith("/") || imgData.startsWith("file://"))) {
+                            try {
+                                val path = imgData.replace("file://", "")
+                                val file = java.io.File(path)
+                                if (file.exists()) {
+                                    val bytes = file.readBytes()
+                                    android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                                } else {
+                                    null
+                                }
+                            } catch (e: Exception) {
+                                null
+                            }
+                        } else {
+                            imgData
+                        }
+                    }
+
+                    resolvedImages.forEach { imgData ->
                         if (imgData.isNotBlank()) {
                             val inlineDataObj = JSONObject()
                             inlineDataObj.put("mimeType", "image/jpeg")

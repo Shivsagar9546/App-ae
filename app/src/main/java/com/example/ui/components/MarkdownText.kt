@@ -354,6 +354,8 @@ fun formatMathSymbols(raw: String): String {
         .replace("\\neq", " ≠ ")
         .replace("\\leq", " ≤ ")
         .replace("\\geq", " ≥ ")
+        .replace("\\le", " ≤ ")
+        .replace("\\ge", " ≥ ")
         .replace("\\alpha", "α")
         .replace("\\beta", "β")
         .replace("\\theta", "θ")
@@ -368,6 +370,17 @@ fun formatMathSymbols(raw: String): String {
         .replace("^{2}", "²")
         .replace("^{3}", "³")
         .replace("^{n}", "ⁿ")
+        .replace("^{-1}", "⁻¹")
+        .replace("^⁻¹", "⁻¹")
+        .replace("\\cos", "cos")
+        .replace("\\sin", "sin")
+        .replace("\\tan", "tan")
+        .replace("\\left(", "(")
+        .replace("\\right)", ")")
+        .replace("\\left[", "[")
+        .replace("\\right]", "]")
+        .replace("\\left", "")
+        .replace("\\right", "")
 }
 
 @Composable

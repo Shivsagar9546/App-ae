@@ -62,7 +62,25 @@ class OpenAiApiClient {
                 }
                 msgObj.put("role", role)
 
-                val imgData = if (index == messages.lastIndex) (imageInlineBase64 ?: msg.imageBase64) else msg.imageBase64
+                val rawImgData = if (index == messages.lastIndex) (imageInlineBase64 ?: msg.imageBase64) else msg.imageBase64
+                val imgData = rawImgData?.let { pathOrBase64 ->
+                    if (pathOrBase64.isNotBlank() && (pathOrBase64.startsWith("/") || pathOrBase64.startsWith("file://"))) {
+                        try {
+                            val path = pathOrBase64.replace("file://", "")
+                            val file = java.io.File(path)
+                            if (file.exists()) {
+                                val bytes = file.readBytes()
+                                android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                            } else {
+                                null
+                            }
+                        } catch (e: Exception) {
+                            null
+                        }
+                    } else {
+                        pathOrBase64
+                    }
+                }
 
                 if (!imgData.isNullOrBlank()) {
                     val contentArray = JSONArray()

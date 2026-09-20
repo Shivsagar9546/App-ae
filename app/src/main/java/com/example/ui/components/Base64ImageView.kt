@@ -28,13 +28,18 @@ fun Base64ImageView(
 ) {
     val bitmap: Bitmap? = remember(base64String) {
         try {
-            val cleanBase64 = if (base64String.contains(",")) {
-                base64String.substringAfter(",")
+            if (base64String.isNotBlank() && (base64String.startsWith("/") || base64String.startsWith("file://"))) {
+                val filePath = base64String.replace("file://", "")
+                BitmapFactory.decodeFile(filePath)
             } else {
-                base64String
+                val cleanBase64 = if (base64String.contains(",")) {
+                    base64String.substringAfter(",")
+                } else {
+                    base64String
+                }
+                val decodedBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+                BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
             }
-            val decodedBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
-            BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
         } catch (e: Exception) {
             null
         }

@@ -831,7 +831,9 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             captureScreenshotHelper(
                 onSuccess = { fullBitmap ->
                     val targetBmp = if (cropRect != null) {
-                        cropBitmap(fullBitmap, cropRect)
+                        val cropped = cropBitmap(fullBitmap, cropRect)
+                        fullBitmap.recycle()
+                        cropped
                     } else {
                         fullBitmap
                     }
@@ -848,6 +850,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                             imageBitmap = targetBmp,
                             isScreenScan = true
                         )
+                        targetBmp.recycle()
                         
                         withContext(Dispatchers.Main) {
                             _isOcrLoading.value = false
@@ -865,7 +868,9 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                 onGalleryBackup = {
                     FloatingImagePickerActivity.launchScreenCapture(this@FloatingAssistantService) { fullBitmap ->
                         val targetBmp = if (cropRect != null) {
-                            cropBitmap(fullBitmap, cropRect)
+                            val cropped = cropBitmap(fullBitmap, cropRect)
+                            fullBitmap.recycle()
+                            cropped
                         } else {
                             fullBitmap
                         }
@@ -882,6 +887,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                                 imageBitmap = targetBmp,
                                 isScreenScan = true
                             )
+                            targetBmp.recycle()
                             
                             withContext(Dispatchers.Main) {
                                 _isOcrLoading.value = false
@@ -1007,7 +1013,9 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             captureScreenshotHelper(
                 onSuccess = { fullBitmap ->
                     val targetBmp = if (cropRect != null) {
-                        cropBitmap(fullBitmap, cropRect)
+                        val cropped = cropBitmap(fullBitmap, cropRect)
+                        fullBitmap.recycle()
+                        cropped
                     } else {
                         fullBitmap
                     }
@@ -1024,6 +1032,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                             imageBitmap = targetBmp,
                             isScreenScan = true
                         )
+                        targetBmp.recycle()
                         
                         withContext(Dispatchers.Main) {
                             _isHudLoading.value = false
@@ -1041,7 +1050,9 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                 onGalleryBackup = {
                     FloatingImagePickerActivity.launchScreenCapture(this@FloatingAssistantService) { fullBitmap ->
                         val targetBmp = if (cropRect != null) {
-                            cropBitmap(fullBitmap, cropRect)
+                            val cropped = cropBitmap(fullBitmap, cropRect)
+                            fullBitmap.recycle()
+                            cropped
                         } else {
                             fullBitmap
                         }
@@ -1058,6 +1069,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                                 imageBitmap = targetBmp,
                                 isScreenScan = true
                             )
+                            targetBmp.recycle()
                             
                             withContext(Dispatchers.Main) {
                                 _isHudLoading.value = false
@@ -1136,6 +1148,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     }
 
     fun showCropOverlay(bitmap: Bitmap) {
+        cropBackgroundBitmap?.recycle()
         cropBackgroundBitmap = bitmap
         hidePopup()
         hideBubble()
@@ -1176,6 +1189,8 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                                     try {
                                         val cropped = cropBitmap(bg, rect)
                                         _attachedImage.value = cropped
+                                        bg.recycle()
+                                        cropBackgroundBitmap = null
                                         showPopup()
                                     } catch (e: Exception) {
                                         Toast.makeText(this@FloatingAssistantService, "Cropping failed: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -1190,6 +1205,8 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         },
                         onCancel = {
                             hideCropOverlay()
+                            cropBackgroundBitmap?.recycle()
+                            cropBackgroundBitmap = null
                             showPopup()
                         }
                     )
@@ -1230,7 +1247,9 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             captureScreenshotHelper(
                 onSuccess = { fullBitmap ->
                     val targetBmp = if (cropRect != null) {
-                        cropBitmap(fullBitmap, cropRect)
+                        val cropped = cropBitmap(fullBitmap, cropRect)
+                        fullBitmap.recycle()
+                        cropped
                     } else {
                         fullBitmap
                     }
@@ -1241,7 +1260,9 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                 onGalleryBackup = {
                     FloatingImagePickerActivity.launchScreenCapture(this@FloatingAssistantService) { fullBitmap ->
                         val targetBmp = if (cropRect != null) {
-                            cropBitmap(fullBitmap, cropRect)
+                            val cropped = cropBitmap(fullBitmap, cropRect)
+                            fullBitmap.recycle()
+                            cropped
                         } else {
                             fullBitmap
                         }
@@ -1262,7 +1283,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             val app = application as OmniAIApplication
             val convId = _currentConversationId.value
 
-            val imageBase64 = withContext(Dispatchers.Default) {
+            val imageBase64 = withContext(Dispatchers.IO) {
                 try {
                     val maxDim = 800
                     var scaled = bitmap
@@ -1272,9 +1293,14 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         val newH = if (bitmap.width > bitmap.height) (maxDim / ratio).toInt() else maxDim
                         scaled = Bitmap.createScaledBitmap(bitmap, newW.coerceAtLeast(1), newH.coerceAtLeast(1), true)
                     }
-                    val stream = java.io.ByteArrayOutputStream()
-                    scaled.compress(Bitmap.CompressFormat.JPEG, 75, stream)
-                    android.util.Base64.encodeToString(stream.toByteArray(), android.util.Base64.NO_WRAP)
+                    val cacheFile = java.io.File(app.cacheDir, "img_${java.util.UUID.randomUUID()}.jpg")
+                    java.io.FileOutputStream(cacheFile).use { fos ->
+                        scaled.compress(Bitmap.CompressFormat.JPEG, 75, fos)
+                    }
+                    if (scaled != bitmap) {
+                        scaled.recycle()
+                    }
+                    cacheFile.absolutePath
                 } catch (e: Exception) {
                     null
                 }
@@ -1316,6 +1342,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                     isScreenScan = true
                 )
             }
+            bitmap.recycle()
 
             _isGenerating.value = false
             _statusText.value = null
@@ -1369,7 +1396,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             val app = application as OmniAIApplication
             val convId = _currentConversationId.value
 
-            val imageBase64 = withContext(Dispatchers.Default) {
+            val imageBase64 = withContext(Dispatchers.IO) {
                 imageBitmap?.let { bitmap ->
                     try {
                         val maxDim = 800
@@ -1380,9 +1407,14 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                             val newH = if (bitmap.width > bitmap.height) (maxDim / ratio).toInt() else maxDim
                             scaled = Bitmap.createScaledBitmap(bitmap, newW.coerceAtLeast(1), newH.coerceAtLeast(1), true)
                         }
-                        val stream = java.io.ByteArrayOutputStream()
-                        scaled.compress(Bitmap.CompressFormat.JPEG, 75, stream)
-                        android.util.Base64.encodeToString(stream.toByteArray(), android.util.Base64.NO_WRAP)
+                        val cacheFile = java.io.File(app.cacheDir, "img_${java.util.UUID.randomUUID()}.jpg")
+                        java.io.FileOutputStream(cacheFile).use { fos ->
+                            scaled.compress(Bitmap.CompressFormat.JPEG, 75, fos)
+                        }
+                        if (scaled != bitmap) {
+                            scaled.recycle()
+                        }
+                        cacheFile.absolutePath
                     } catch (e: Exception) {
                         null
                     }
@@ -1425,6 +1457,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                     isScreenScan = isScan
                 )
             }
+            imageBitmap?.recycle()
 
             _isGenerating.value = false
 
