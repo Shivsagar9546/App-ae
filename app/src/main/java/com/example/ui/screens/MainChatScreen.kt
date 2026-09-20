@@ -145,7 +145,6 @@ fun MainChatScreen(
     val adminSettings by viewModel.adminSettings.collectAsState()
     val isListening by viewModel.voiceHelper.isListening.collectAsState()
 
-    var activeMode by remember { mutableIntStateOf(0) } // 0: AI Assistant, 1: Gemini Direct Web (No API)
     var inputText by remember { mutableStateOf("") }
     var showAttachmentMenu by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
@@ -313,71 +312,7 @@ fun MainChatScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Segmented Tab Switcher: Omni Assistant vs Gemini Web (No API)
-            TabRow(
-                selectedTabIndex = activeMode,
-                containerColor = MaterialTheme.colorScheme.surface,
-                contentColor = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Tab(
-                    selected = activeMode == 0,
-                    onClick = { activeMode = 0 },
-                    text = {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.SmartToy,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                "Smart Assistant",
-                                fontWeight = if (activeMode == 0) FontWeight.Bold else FontWeight.Normal
-                            )
-                        }
-                    }
-                )
-                Tab(
-                    selected = activeMode == 1,
-                    onClick = { activeMode = 1 },
-                    text = {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Language,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                "Gemini Web (No API)",
-                                fontWeight = if (activeMode == 1) FontWeight.Bold else FontWeight.Normal
-                            )
-                        }
-                    }
-                )
-            }
-
-            if (activeMode == 1) {
-                // Direct Google Gemini Web Chat (Uses official Google interface, 0 API config)
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                ) {
-                    GeminiDirectWebView(
-                        isCompact = false,
-                        onBackToAssistant = { activeMode = 0 },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-            } else {
-                // Status bar message (e.g. "Screen frame capturing...")
+            // Status bar message (e.g. "Screen frame capturing...")
                 AnimatedVisibility(visible = statusMessage != null) {
                     Surface(
                         color = MaterialTheme.colorScheme.primaryContainer,
@@ -413,10 +348,7 @@ fun MainChatScreen(
                             onPromptSelected = { prompt ->
                                 viewModel.sendMessage(prompt)
                             },
-                            onFloatingAssistantClicked = onNavigateToFloatingHub,
-                            onSwitchToGeminiWeb = {
-                                activeMode = 1
-                            }
+                            onFloatingAssistantClicked = onNavigateToFloatingHub
                         )
                     } else {
                         LazyColumn(
@@ -709,7 +641,6 @@ fun MainChatScreen(
                 }
             }
         }
-    }
 
     if (showAttachmentMenu) {
         AttachmentBottomSheet(
@@ -728,8 +659,7 @@ fun MainChatScreen(
 @Composable
 private fun WelcomeHomeLayout(
     onPromptSelected: (String) -> Unit,
-    onFloatingAssistantClicked: () -> Unit,
-    onSwitchToGeminiWeb: () -> Unit
+    onFloatingAssistantClicked: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -775,10 +705,10 @@ private fun WelcomeHomeLayout(
 
         Spacer(modifier = Modifier.height(28.dp))
 
-        // Sleek 2x2 Feature Cards
+        // Clean prominent Feature Launcher Button (Floating Assistant Hub)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.Center
         ) {
             Surface(
                 onClick = onFloatingAssistantClicked,
@@ -786,55 +716,36 @@ private fun WelcomeHomeLayout(
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)),
                 modifier = Modifier
-                    .weight(1f)
+                    .fillMaxWidth()
                     .height(90.dp)
             ) {
-                Column(
+                Row(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.SpaceBetween
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = Icons.Default.Screenshot,
                         contentDescription = null,
                         tint = Color(0xFF06B6D4),
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(28.dp)
                     )
-                    Text(
-                        text = "Floating Assistant",
-                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-            }
-
-            Surface(
-                onClick = onSwitchToGeminiWeb,
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)),
-                modifier = Modifier
-                    .weight(1f)
-                    .height(90.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Language,
-                        contentDescription = null,
-                        tint = Color(0xFF8B5CF6),
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Text(
-                        text = "Gemini Web",
-                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Column(
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "Smart Floating Assistant",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Launch screen scanner and floating tools overlay",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }

@@ -111,6 +111,7 @@ fun FloatingPopUpView(
     onInstantTextScan: () -> Unit = {},
     onScanScreen: () -> Unit = {},
     onAreaScan: () -> Unit,
+    onScreenshotCapture: () -> Unit,
     onOcrGrabber: () -> Unit = {},
     onQuickHud: () -> Unit = {},
     onPickGalleryImage: ((Bitmap) -> Unit) -> Unit = {},
@@ -124,10 +125,11 @@ fun FloatingPopUpView(
     onClose: () -> Unit,
     onDragHeader: (dx: Float, dy: Float) -> Unit,
     onResize: (dw: Float, dh: Float) -> Unit,
-    onAlphaChanged: (Float) -> Unit = {}
+    onAlphaChanged: (Float) -> Unit = {},
+    externalAttachedBitmap: Bitmap? = null,
+    onClearExternalAttachedBitmap: () -> Unit = {}
 ) {
     var inputText by remember { mutableStateOf("") }
-    var currentTab by remember { mutableIntStateOf(0) } // 0: AI Tools, 1: Gemini Direct Web
     var attachedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var currentlySpeakingText by remember { mutableStateOf<String?>(null) }
     var windowAlpha by remember { mutableStateOf(1.0f) }
@@ -135,6 +137,13 @@ fun FloatingPopUpView(
     val listState = rememberLazyListState()
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+
+    LaunchedEffect(externalAttachedBitmap) {
+        if (externalAttachedBitmap != null) {
+            attachedBitmap = externalAttachedBitmap
+            onClearExternalAttachedBitmap()
+        }
+    }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -358,155 +367,38 @@ fun FloatingPopUpView(
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Text(
-                                        text = "Window Transparency (Aar-paar dikhega)",
+                                        text = "Window Transparency",
                                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
-
-                                Text(
-                                    text = "${(windowAlpha * 100).toInt()}% Opacity",
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.primary
-                                )
                             }
 
                             Spacer(modifier = Modifier.height(2.dp))
 
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text(
-                                    text = "25%",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            Slider(
+                                value = windowAlpha,
+                                onValueChange = { 
+                                    windowAlpha = it
+                                    onAlphaChanged(it)
+                                },
+                                valueRange = 0.25f..1.0f,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("popup_transparency_slider"),
+                                colors = SliderDefaults.colors(
+                                    thumbColor = MaterialTheme.colorScheme.primary,
+                                    activeTrackColor = MaterialTheme.colorScheme.primary,
+                                    inactiveTrackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
                                 )
-
-                                Slider(
-                                    value = windowAlpha,
-                                    onValueChange = { 
-                                        windowAlpha = it
-                                        onAlphaChanged(it)
-                                    },
-                                    valueRange = 0.25f..1.0f,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("popup_transparency_slider"),
-                                    colors = SliderDefaults.colors(
-                                        thumbColor = MaterialTheme.colorScheme.primary,
-                                        activeTrackColor = MaterialTheme.colorScheme.primary,
-                                        inactiveTrackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-                                    )
-                                )
-
-                                Text(
-                                    text = "100%",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                                )
-                            }
-
-                            // Quick Preset Buttons
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                val presets = listOf(
-                                    "100% Solid" to 1.0f,
-                                    "75%" to 0.75f,
-                                    "50% Half" to 0.50f,
-                                    "30% Ghost" to 0.30f
-                                )
-                                presets.forEach { (label, value) ->
-                                    val isSelected = kotlin.math.abs(windowAlpha - value) < 0.05f
-                                    Surface(
-                                        onClick = { 
-                                            windowAlpha = value
-                                            onAlphaChanged(value)
-                                        },
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
-                                        border = if (isSelected) null else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier.padding(vertical = 4.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = label,
-                                                fontSize = 10.sp,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-                                            )
-                                        }
-                                    }
-                                }
-                            }
+                            )
                         }
                     }
                 }
 
-                // Top Tab Switcher: Smart Assistant vs Gemini Web (No API)
-                TabRow(
-                    selectedTabIndex = currentTab,
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    contentColor = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(38.dp)
-                ) {
-                    Tab(
-                        selected = currentTab == 0,
-                        onClick = { currentTab = 0 },
-                        text = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.SmartToy,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text("Smart Tools", fontSize = 11.sp, fontWeight = if (currentTab == 0) FontWeight.Bold else FontWeight.Normal)
-                            }
-                        }
-                    )
-                    Tab(
-                        selected = currentTab == 1,
-                        onClick = { currentTab = 1 },
-                        text = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Language,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text("Gemini Web (No API)", fontSize = 11.sp, fontWeight = if (currentTab == 1) FontWeight.Bold else FontWeight.Normal)
-                            }
-                        }
-                    )
-                }
-
-                if (currentTab == 1) {
-                    // Direct Official Gemini Web Chat (Zero API Keys required)
-                    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                        GeminiDirectWebView(
-                            isCompact = true,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                } else {
-                    // Smart AI Tools & Chat View
-                    // Status Banner (if capturing / analyzing screen)
-                    AnimatedVisibility(visible = statusText != null) {
+                // Smart AI Tools & Chat View
+                // Status Banner (if capturing / analyzing screen)
+                AnimatedVisibility(visible = statusText != null) {
                         Surface(
                             color = MaterialTheme.colorScheme.primaryContainer,
                             modifier = Modifier.fillMaxWidth()
@@ -559,80 +451,6 @@ fun FloatingPopUpView(
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                 )
                                 Spacer(modifier = Modifier.height(14.dp))
-
-                                // Initial Action Buttons: Instant Text, Crop Area, Upload Photo
-                                Column(
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.padding(horizontal = 8.dp)
-                                ) {
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Button(
-                                            onClick = onInstantTextScan,
-                                            shape = RoundedCornerShape(16.dp),
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = MaterialTheme.colorScheme.primary
-                                            ),
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .testTag("popup_initial_instant_text_button")
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Bolt,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(5.dp))
-                                            Text("⚡ Instant Text", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                        }
-
-                                        Button(
-                                            onClick = onAreaScan,
-                                            shape = RoundedCornerShape(16.dp),
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                                            ),
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .testTag("popup_initial_crop_button")
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.CropFree,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(5.dp))
-                                            Text("✂️ Crop Area", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-
-                                    Button(
-                                        onClick = {
-                                            onPickGalleryImage { bmp ->
-                                                attachedBitmap = bmp
-                                            }
-                                        },
-                                        shape = RoundedCornerShape(16.dp),
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                        ),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .testTag("popup_initial_image_button")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.PhotoLibrary,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("🖼️ Upload Image from Gallery", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                    }
-                                }
                             }
                         } else {
                             LazyColumn(
@@ -689,11 +507,12 @@ fun FloatingPopUpView(
                         }
                     }
 
-                    // Quick Action Chips (Explain, Solve, Translate, etc.)
-                    if (messages.isNotEmpty()) {
+                    // Quick Action Chips (Explain, Solve, Translate, etc.) - Only visible when empty
+                    if (messages.isEmpty() && attachedBitmap == null) {
                         QuickActionChips(
                             onActionSelected = { prompt ->
-                                onSendMessage(prompt, null)
+                                onSendMessage(prompt, attachedBitmap)
+                                attachedBitmap = null
                             }
                         )
                     }
@@ -808,6 +627,28 @@ fun FloatingPopUpView(
                                      )
                                      Spacer(modifier = Modifier.width(3.dp))
                                      Text("⚡ Instant", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                 }
+
+                                // 0.1 Screenshot Capture
+                                Button(
+                                    onClick = onScreenshotCapture,
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.tertiary,
+                                        contentColor = MaterialTheme.colorScheme.onTertiary
+                                    ),
+                                    modifier = Modifier
+                                        .height(32.dp)
+                                        .testTag("popup_screenshot_button")
+                                 ) {
+                                     Icon(
+                                         imageVector = Icons.Default.Screenshot,
+                                         contentDescription = "Screenshot",
+                                         modifier = Modifier.size(13.dp)
+                                     )
+                                     Spacer(modifier = Modifier.width(3.dp))
+                                     Text("📷 Screen", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                  }
 
                                 // 1. Crop Selected Area
@@ -952,7 +793,6 @@ fun FloatingPopUpView(
                         }
                     }
                 }
-            }
 
             // Bottom-Right Corner Resize Grip Handle
             Box(

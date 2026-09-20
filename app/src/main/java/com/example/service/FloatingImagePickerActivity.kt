@@ -6,6 +6,10 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
+import android.media.ImageReader
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -32,6 +36,18 @@ class FloatingImagePickerActivity : ComponentActivity() {
     ) { uri: Uri? ->
         handleImageUri(uri)
         safeFinish()
+    }
+ 
+    private val screenCaptureLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            captureScreen(result.resultCode, result.data!!)
+        } else {
+            Toast.makeText(this, "Screen capture cancelled", Toast.LENGTH_SHORT).show()
+            FloatingAssistantService.activeServiceInstance?.showBubble()
+            safeFinish()
+        }
     }
 
     private val pickVisualMediaLauncher = registerForActivityResult(
@@ -76,6 +92,22 @@ class FloatingImagePickerActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val mode = intent.getStringExtra(EXTRA_MODE) ?: MODE_GALLERY
         when (mode) {
+            MODE_SCREEN_CAPTURE -> {
+                try {
+                    val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                    val captureIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                        val config = android.media.projection.MediaProjectionConfig.createConfigForDefaultDisplay()
+                        mediaProjectionManager.createScreenCaptureIntent(config)
+                    } else {
+                        mediaProjectionManager.createScreenCaptureIntent()
+                    }
+                    screenCaptureLauncher.launch(captureIntent)
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Screen capture not supported: ${e.message}", Toast.LENGTH_SHORT).show()
+                    FloatingAssistantService.activeServiceInstance?.showBubble()
+                    safeFinish()
+                }
+            }
             MODE_CAMERA -> {
                 if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
                     try {
@@ -162,6 +194,144 @@ class FloatingImagePickerActivity : ComponentActivity() {
         }
     }
 
+    private fun captureScreen(resultCode: Int, resultData: Intent) {
+        try {
+            val fgs = FloatingAssistantService.activeServiceInstance
+            fgs?.promoteToMediaProjectionFgs()
+
+            val mpManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            val projection = mpManager.getMediaProjection(resultCode, resultData) ?: run {
+                Toast.makeText(this, "Screen capture permission denied", Toast.LENGTH_SHORT).show()
+                fgs?.showBubble()
+                safeFinish()
+                return
+            }
+
+            val windowManager = getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+            val display = windowManager.defaultDisplay
+            val metrics = android.util.DisplayMetrics()
+            display.getRealMetrics(metrics)
+            val width = metrics.widthPixels
+            val height = metrics.heightPixels
+            val density = metrics.densityDpi
+
+            val imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+            val virtualDisplay = projection.createVirtualDisplay(
+                "ScreenCapture",
+                width,
+                height,
+                density,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader.surface,
+                null,
+                null
+            ) ?: run {
+                projection.stop()
+                imageReader.close()
+                fgs?.demoteFromMediaProjectionFgs()
+                fgs?.showBubble()
+                Toast.makeText(this, "Virtual display setup failed", Toast.LENGTH_SHORT).show()
+                safeFinish()
+                return
+            }
+
+            val handler = android.os.Handler(android.os.Looper.getMainLooper())
+            handler.postDelayed({
+                try {
+                    val image = imageReader.acquireLatestImage()
+                    if (image != null) {
+                        val planes = image.planes
+                        val buffer = planes[0].buffer
+                        val pixelStride = planes[0].pixelStride
+                        val rowStride = planes[0].rowStride
+                        val rowPadding = rowStride - pixelStride * width
+
+                        val bitmap = Bitmap.createBitmap(
+                            width + rowPadding / pixelStride,
+                            height,
+                            Bitmap.Config.ARGB_8888
+                        )
+                        bitmap.copyPixelsFromBuffer(buffer)
+                        image.close()
+
+                        val cleanBitmap = if (bitmap.width != width) {
+                            Bitmap.createBitmap(bitmap, 0, 0, width, height)
+                        } else {
+                            bitmap
+                        }
+
+                        virtualDisplay.release()
+                        projection.stop()
+                        imageReader.close()
+                        fgs?.demoteFromMediaProjectionFgs()
+
+                        onImageSelectedCallback?.invoke(cleanBitmap)
+                    } else {
+                        // Retry once
+                        handler.postDelayed({
+                            try {
+                                val img2 = imageReader.acquireLatestImage()
+                                if (img2 != null) {
+                                    val planes = img2.planes
+                                    val buffer = planes[0].buffer
+                                    val pixelStride = planes[0].pixelStride
+                                    val rowStride = planes[0].rowStride
+                                    val rowPadding = rowStride - pixelStride * width
+
+                                    val bitmap = Bitmap.createBitmap(
+                                        width + rowPadding / pixelStride,
+                                        height,
+                                        Bitmap.Config.ARGB_8888
+                                    )
+                                    bitmap.copyPixelsFromBuffer(buffer)
+                                    img2.close()
+
+                                    val cleanBitmap = if (bitmap.width != width) {
+                                        Bitmap.createBitmap(bitmap, 0, 0, width, height)
+                                    } else {
+                                        bitmap
+                                    }
+
+                                    virtualDisplay.release()
+                                    projection.stop()
+                                    imageReader.close()
+                                    fgs?.demoteFromMediaProjectionFgs()
+
+                                    onImageSelectedCallback?.invoke(cleanBitmap)
+                                } else {
+                                    virtualDisplay.release()
+                                    projection.stop()
+                                    imageReader.close()
+                                    fgs?.demoteFromMediaProjectionFgs()
+                                    fgs?.showBubble()
+                                    Toast.makeText(this, "Screen capture timed out", Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (e: Exception) {
+                                fgs?.demoteFromMediaProjectionFgs()
+                                fgs?.showBubble()
+                                Toast.makeText(this, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                            } finally {
+                                safeFinish()
+                            }
+                        }, 50)
+                        return@postDelayed
+                    }
+                } catch (e: Exception) {
+                    fgs?.demoteFromMediaProjectionFgs()
+                    fgs?.showBubble()
+                    Toast.makeText(this, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                } finally {
+                    safeFinish()
+                }
+            }, 150)
+
+        } catch (e: Exception) {
+            FloatingAssistantService.activeServiceInstance?.demoteFromMediaProjectionFgs()
+            Toast.makeText(this, "Screen capture setup failed: ${e.message}", Toast.LENGTH_SHORT).show()
+            safeFinish()
+        }
+    }
+
     private fun scaleDownBitmap(bitmap: Bitmap, maxDim: Int): Bitmap {
         return if (bitmap.width > maxDim || bitmap.height > maxDim) {
             val ratio = bitmap.width.toFloat() / bitmap.height.toFloat()
@@ -177,8 +347,18 @@ class FloatingImagePickerActivity : ComponentActivity() {
         const val EXTRA_MODE = "extra_mode"
         const val MODE_GALLERY = "mode_gallery"
         const val MODE_CAMERA = "mode_camera"
+        const val MODE_SCREEN_CAPTURE = "mode_screen_capture"
 
         private var onImageSelectedCallback: ((Bitmap) -> Unit)? = null
+
+        fun launchScreenCapture(context: Context, onPicked: (Bitmap) -> Unit) {
+            onImageSelectedCallback = onPicked
+            val intent = Intent(context, FloatingImagePickerActivity::class.java).apply {
+                putExtra(EXTRA_MODE, MODE_SCREEN_CAPTURE)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+            }
+            context.startActivity(intent)
+        }
 
         fun launchGalleryPicker(context: Context, onPicked: (Bitmap) -> Unit) {
             onImageSelectedCallback = onPicked

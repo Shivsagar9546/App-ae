@@ -24,6 +24,17 @@ class AiRepository(
         systemPromptOverride: String? = null
     ): AiResult = withContext(Dispatchers.IO) {
         val settings = adminPreferencesRepository.getSettings()
+        val advanced = com.example.data.preferences.AdvancedSettingsHelper(adminPreferencesRepository.context)
+
+        // Check Maintenance Mode
+        if (advanced.isMaintenanceMode) {
+            return@withContext AiResult.Error("The Screen Assistant is currently undergoing maintenance. Please try again later.")
+        }
+
+        // Check Daily Quota Limit
+        if (settings.todayRequests >= advanced.dailyQuotaLimit) {
+            return@withContext AiResult.Error("Daily scan quota limit of ${advanced.dailyQuotaLimit} reached. Please contact your administrator.")
+        }
 
         // Check if screen scan is disabled by admin
         if (isScreenScan && !settings.isScreenScanEnabled) {
@@ -55,9 +66,33 @@ class AiRepository(
         val primaryProvider = settings.defaultProvider.lowercase()
         val sysPrompt = systemPromptOverride ?: settings.systemPrompt
 
+        // Prepare Gemini Keys to try
+        val geminiKeys = mutableListOf<String>()
+        if (settings.geminiApiKey.isNotBlank()) {
+            geminiKeys.add(settings.geminiApiKey)
+        }
+        if (advanced.geminiApiKey2.isNotBlank()) {
+            geminiKeys.add(advanced.geminiApiKey2)
+        }
+        if (advanced.geminiApiKey3.isNotBlank()) {
+            geminiKeys.add(advanced.geminiApiKey3)
+        }
+        if (advanced.geminiApiKey4.isNotBlank()) {
+            geminiKeys.add(advanced.geminiApiKey4)
+        }
+        if (advanced.geminiApiKey5.isNotBlank()) {
+            geminiKeys.add(advanced.geminiApiKey5)
+        }
+        if (geminiKeys.isEmpty()) {
+            geminiKeys.add("") // try fallback / default key
+        }
+
+        var finalResult: AiResult? = null
+        val startTime = System.currentTimeMillis()
+
         // Try primary provider
-        val primaryResult = if (primaryProvider == "openai") {
-            openAiApiClient.generateContent(
+        if (primaryProvider == "openai") {
+            finalResult = openAiApiClient.generateContent(
                 apiKey = settings.openAiApiKey,
                 model = settings.openAiModel,
                 systemPrompt = sysPrompt,
@@ -65,36 +100,48 @@ class AiRepository(
                 imageInlineBase64 = firstImageBase64
             )
         } else {
-            geminiApiClient.generateContent(
-                apiKeyOverride = settings.geminiApiKey.ifBlank { null },
-                model = settings.geminiModel,
-                systemPrompt = sysPrompt,
-                messages = messages,
-                imageInlineBase64 = firstImageBase64,
-                imagesInlineBase64 = compressedImagesBase64
-            )
-        }
-
-        if (primaryResult is AiResult.Success) {
-            adminPreferencesRepository.recordRequest(primaryResult.providerUsed, isScreenScan)
-            return@withContext primaryResult
-        }
-
-        // If primary failed and fallback is enabled, try the alternative
-        if (settings.isFallbackEnabled) {
-            val fallbackResult = if (primaryProvider == "openai") {
-                // Fallback to Gemini
-                geminiApiClient.generateContent(
-                    apiKeyOverride = settings.geminiApiKey.ifBlank { null },
+            // Try Gemini keys in sequence for automatic key rotation failover
+            for (keyToTry in geminiKeys) {
+                val geminiResult = geminiApiClient.generateContent(
+                    apiKeyOverride = keyToTry.ifBlank { null },
                     model = settings.geminiModel,
                     systemPrompt = sysPrompt,
                     messages = messages,
                     imageInlineBase64 = firstImageBase64,
                     imagesInlineBase64 = compressedImagesBase64
                 )
+                if (geminiResult is AiResult.Success) {
+                    finalResult = geminiResult
+                    break
+                } else {
+                    finalResult = geminiResult // save error to return if all fail
+                }
+            }
+        }
+
+        // If primary failed and fallback is enabled, try the alternative
+        if (finalResult !is AiResult.Success && settings.isFallbackEnabled) {
+            if (primaryProvider == "openai") {
+                // Fallback to Gemini with key rotation
+                for (keyToTry in geminiKeys) {
+                    val fallbackResult = geminiApiClient.generateContent(
+                        apiKeyOverride = keyToTry.ifBlank { null },
+                        model = settings.geminiModel,
+                        systemPrompt = sysPrompt,
+                        messages = messages,
+                        imageInlineBase64 = firstImageBase64,
+                        imagesInlineBase64 = compressedImagesBase64
+                    )
+                    if (fallbackResult is AiResult.Success) {
+                        finalResult = fallbackResult
+                        break
+                    } else {
+                        finalResult = fallbackResult
+                    }
+                }
             } else {
                 // Fallback to OpenAI
-                openAiApiClient.generateContent(
+                finalResult = openAiApiClient.generateContent(
                     apiKey = settings.openAiApiKey,
                     model = settings.openAiModel,
                     systemPrompt = sysPrompt,
@@ -102,16 +149,20 @@ class AiRepository(
                     imageInlineBase64 = firstImageBase64
                 )
             }
+        }
 
-            if (fallbackResult is AiResult.Success) {
-                adminPreferencesRepository.recordRequest(fallbackResult.providerUsed, isScreenScan)
-                return@withContext fallbackResult
-            }
+        if (finalResult is AiResult.Success) {
+            val latency = System.currentTimeMillis() - startTime
+            try {
+                advanced.lastApiLatencyMs = latency
+            } catch (e: Exception) {}
+            adminPreferencesRepository.recordRequest(finalResult.providerUsed, isScreenScan)
+            return@withContext finalResult
         }
 
         // If all failed, record error and return error
         adminPreferencesRepository.recordError()
-        val errorMsg = (primaryResult as? AiResult.Error)?.message ?: "Unable to complete AI request."
+        val errorMsg = (finalResult as? AiResult.Error)?.message ?: "Unable to complete AI request."
         return@withContext AiResult.Error(errorMsg)
     }
 

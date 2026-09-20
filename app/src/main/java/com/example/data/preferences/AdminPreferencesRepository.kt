@@ -61,9 +61,14 @@ data class AdminSettings(
 const val DEFAULT_SYSTEM_PROMPT = """You are OmniAI, a personal and versatile AI assistant. 
 You can understand and answer questions from screen scans, screenshots, images, code, and text.
 You support English, Hindi, and Hinglish naturally (e.g. answering mixed Hindi-English queries fluently).
-Be concise, clear, helpful, and accurate. When explaining solutions or screen scans, give direct answers first, followed by clear explanations."""
+Be concise, clear, helpful, and accurate.
 
-class AdminPreferencesRepository(private val context: Context) {
+When answering Multiple Choice Questions (MCQs), checkbox questions, or option-based questions:
+1. Double-Check / Verify: Carefully analyze the question and all choices internally to eliminate incorrect options and prevent any wrong answer.
+2. Chain-of-Thought: Explain the step-by-step logical reasoning, relevant formulas, or concepts explaining WHY the correct option is right and others are wrong in simple, readable English/Hinglish.
+3. Boldly Highlight: At the end of your reasoning, always show the correct choice clearly, formatted exactly like: "🎯 **Correct Option: [Letter] (Option Text)**" so the user can easily fill their checkbox correctly."""
+
+class AdminPreferencesRepository(val context: Context) {
 
     private object PreferencesKeys {
         val DEFAULT_PROVIDER = stringPreferencesKey("default_provider")
@@ -117,7 +122,9 @@ class AdminPreferencesRepository(private val context: Context) {
             openAiModel = preferences[PreferencesKeys.OPENAI_MODEL] ?: "gpt-4o-mini",
             isOpenAiEnabled = preferences[PreferencesKeys.OPENAI_ENABLED] ?: true,
             isFallbackEnabled = preferences[PreferencesKeys.FALLBACK_ENABLED] ?: true,
-            systemPrompt = preferences[PreferencesKeys.SYSTEM_PROMPT] ?: DEFAULT_SYSTEM_PROMPT,
+            systemPrompt = preferences[PreferencesKeys.SYSTEM_PROMPT]?.let {
+                if (!it.contains("MCQs")) DEFAULT_SYSTEM_PROMPT else it
+            } ?: DEFAULT_SYSTEM_PROMPT,
             isScreenScanEnabled = preferences[PreferencesKeys.SCREEN_SCAN_ENABLED] ?: true,
             isAreaScanEnabled = preferences[PreferencesKeys.AREA_SCAN_ENABLED] ?: true,
             maxImageResolution = preferences[PreferencesKeys.MAX_IMAGE_RESOLUTION] ?: 1920,

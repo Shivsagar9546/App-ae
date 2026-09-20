@@ -59,6 +59,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -106,6 +107,22 @@ fun AdminPanelScreen(
     var showOpenAiKey by remember { mutableStateOf(false) }
     var showChangePinDialog by remember { mutableStateOf(false) }
     var newPinInput by remember { mutableStateOf("") }
+
+    val advancedHelper = remember { com.example.data.preferences.AdvancedSettingsHelper(context) }
+    var geminiKey2Input by remember { mutableStateOf(advancedHelper.geminiApiKey2) }
+    var geminiKey3Input by remember { mutableStateOf(advancedHelper.geminiApiKey3) }
+    var geminiKey4Input by remember { mutableStateOf(advancedHelper.geminiApiKey4) }
+    var geminiKey5Input by remember { mutableStateOf(advancedHelper.geminiApiKey5) }
+    var showKeysVault by remember { mutableStateOf(false) }
+    var dailyQuotaInput by remember { mutableStateOf(advancedHelper.dailyQuotaLimit.toFloat()) }
+    var isMaintMode by remember { mutableStateOf(advancedHelper.isMaintenanceMode) }
+    var isAutoSpeakMode by remember { mutableStateOf(advancedHelper.isAutoSpeakEnabled) }
+    var adminSecQuestion by remember { mutableStateOf(advancedHelper.adminSecurityQuestion) }
+    var adminSecAnswer by remember { mutableStateOf(advancedHelper.adminSecurityAnswer) }
+    var feedbacksList by remember { mutableStateOf(advancedHelper.getFeedbacks()) }
+    var showForgotPinDialog by remember { mutableStateOf(false) }
+    var recoveryAnswerInput by remember { mutableStateOf("") }
+    var recoveryError by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -239,6 +256,13 @@ fun AdminPanelScreen(
                         .testTag("admin_pin_unlock_button")
                 ) {
                     Text("Unlock Dashboard", fontWeight = FontWeight.Bold)
+                }
+
+                if (advancedHelper.adminSecurityQuestion.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    TextButton(onClick = { showForgotPinDialog = true }) {
+                        Text("Forgot PIN? Reset via Security Question", color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
         } else {
@@ -590,6 +614,266 @@ fun AdminPanelScreen(
                     color = MaterialTheme.colorScheme.onBackground
                 )
 
+                // -------------------------------------------------------------
+                // ADVANCED CONTROLS & AUTOMATION (Features 12, 13 & 14)
+                // -------------------------------------------------------------
+                Text(
+                    text = "Advanced Controls & Automation",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        
+                        // Feature 12: API Latency Speed display
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1.0f)) {
+                                Text(
+                                    text = "Last API Speed",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                )
+                                Text(
+                                    text = "Latency measured on last successful AI response",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            val latency = advancedHelper.lastApiLatencyMs
+                            val latencyText = if (latency > 0) "${latency}ms" else "No requests yet"
+                            val latencyColor = if (latency in 1..800) Color(0xFF10B981) else if (latency > 800) Color(0xFFF59E0B) else MaterialTheme.colorScheme.onSurfaceVariant
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = latencyColor.copy(alpha = 0.15f),
+                                modifier = Modifier.padding(start = 8.dp)
+                            ) {
+                                Text(
+                                    text = latencyText,
+                                    color = latencyColor,
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+
+                        // Feature 3: Remote Maintenance Mode Toggle
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Maintenance Mode",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                )
+                                Text(
+                                    text = "Locks out user functions when undergoing background updates",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = isMaintMode,
+                                onCheckedChange = {
+                                    isMaintMode = it
+                                    advancedHelper.isMaintenanceMode = it
+                                    Toast.makeText(context, "Maintenance Mode updated", Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                        }
+
+                        // Feature 2: Global Usage Limiter (Quota)
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Daily Request Quota Limit",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                )
+                                Text(
+                                    text = "${dailyQuotaInput.toInt()} Scans",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                )
+                            }
+                            Text(
+                                text = "Enforces request capping to prevent personal key overruns or abuse",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Slider(
+                                value = dailyQuotaInput,
+                                onValueChange = {
+                                    dailyQuotaInput = it
+                                    advancedHelper.dailyQuotaLimit = it.toInt()
+                                },
+                                valueRange = 10f..500f,
+                                steps = 49
+                            )
+                        }
+
+                        // Feature 13: Multiple Keys Backup Vault (Rotation)
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Keys Backup Vault (Rotation)",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                    )
+                                    Text(
+                                        text = "Rotating fallback keys to prevent API limits or failures",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                TextButton(onClick = { showKeysVault = !showKeysVault }) {
+                                    Text(if (showKeysVault) "Hide" else "Show Keys")
+                                }
+                            }
+
+                            if (showKeysVault) {
+                                OutlinedTextField(
+                                    value = geminiKey2Input,
+                                    onValueChange = { geminiKey2Input = it; advancedHelper.geminiApiKey2 = it.trim() },
+                                    label = { Text("Gemini Key 2") },
+                                    singleLine = true,
+                                    visualTransformation = PasswordVisualTransformation(),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                OutlinedTextField(
+                                    value = geminiKey3Input,
+                                    onValueChange = { geminiKey3Input = it; advancedHelper.geminiApiKey3 = it.trim() },
+                                    label = { Text("Gemini Key 3") },
+                                    singleLine = true,
+                                    visualTransformation = PasswordVisualTransformation(),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                OutlinedTextField(
+                                    value = geminiKey4Input,
+                                    onValueChange = { geminiKey4Input = it; advancedHelper.geminiApiKey4 = it.trim() },
+                                    label = { Text("Gemini Key 4") },
+                                    singleLine = true,
+                                    visualTransformation = PasswordVisualTransformation(),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                OutlinedTextField(
+                                    value = geminiKey5Input,
+                                    onValueChange = { geminiKey5Input = it; advancedHelper.geminiApiKey5 = it.trim() },
+                                    label = { Text("Gemini Key 5") },
+                                    singleLine = true,
+                                    visualTransformation = PasswordVisualTransformation(),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Text(
+                                    text = "💡 Keys are stored locally and will be automatically tried in sequence if primary key is rate-limited or exhausted.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+
+                        // Feature 14: Multi-Admin Backup security questions (Account recovery)
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = "PIN Security Question Recovery",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                            OutlinedTextField(
+                                value = adminSecQuestion,
+                                onValueChange = { adminSecQuestion = it; advancedHelper.adminSecurityQuestion = it },
+                                label = { Text("Recovery Security Question") },
+                                placeholder = { Text("e.g., What was my first coding language?") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            OutlinedTextField(
+                                value = adminSecAnswer,
+                                onValueChange = { adminSecAnswer = it; advancedHelper.adminSecurityAnswer = it.trim() },
+                                label = { Text("Security Answer") },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
+                        // Feature 14: Logs & User Feedbacks Database Explorer
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "System Logs & Feedbacks Explorer",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                )
+                                if (feedbacksList.isNotEmpty()) {
+                                    TextButton(onClick = {
+                                        advancedHelper.clearFeedbacks()
+                                        feedbacksList = emptyList()
+                                        Toast.makeText(context, "Logs cleared", Toast.LENGTH_SHORT).show()
+                                    }) {
+                                        Text("Clear Logs")
+                                    }
+                                }
+                            }
+                            if (feedbacksList.isEmpty()) {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = "No log files or user feedbacks collected yet.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                        modifier = Modifier.padding(12.dp)
+                                    )
+                                }
+                            } else {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(150.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .padding(8.dp)
+                                            .verticalScroll(rememberScrollState())
+                                    ) {
+                                        feedbacksList.forEach { log ->
+                                            Text(
+                                                text = log,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.padding(bottom = 4.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Button(
                     onClick = { showChangePinDialog = true },
                     shape = RoundedCornerShape(14.dp),
@@ -637,6 +921,62 @@ fun AdminPanelScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showChangePinDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showForgotPinDialog) {
+        AlertDialog(
+            onDismissRequest = { showForgotPinDialog = false },
+            title = { Text("Admin PIN Recovery") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Security Question:",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                    Text(
+                        text = advancedHelper.adminSecurityQuestion,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    OutlinedTextField(
+                        value = recoveryAnswerInput,
+                        onValueChange = { recoveryAnswerInput = it; recoveryError = false },
+                        label = { Text("Your Answer") },
+                        singleLine = true,
+                        isError = recoveryError,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (recoveryError) {
+                        Text(
+                            text = "Incorrect answer. Please try again.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (recoveryAnswerInput.trim().equals(advancedHelper.adminSecurityAnswer, ignoreCase = true)) {
+                            viewModel.updateAdminSettings(adminPin = "1234")
+                            Toast.makeText(context, "PIN has been reset to 1234. Use 1234 to login.", Toast.LENGTH_LONG).show()
+                            showForgotPinDialog = false
+                            recoveryAnswerInput = ""
+                            recoveryError = false
+                        } else {
+                            recoveryError = true
+                        }
+                    }
+                ) {
+                    Text("Verify & Reset")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showForgotPinDialog = false }) {
                     Text("Cancel")
                 }
             }

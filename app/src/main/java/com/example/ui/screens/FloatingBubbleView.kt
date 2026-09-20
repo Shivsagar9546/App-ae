@@ -92,6 +92,7 @@ fun FloatingBubbleView(
     onDragEnd: () -> Unit = {},
     onBubbleClick: () -> Unit,
     onInstantTextScan: () -> Unit = {},
+    onScreenshotCapture: () -> Unit = {},
     onScanScreen: () -> Unit,
     onAreaScan: () -> Unit,
     onOcrGrabber: () -> Unit,
@@ -196,6 +197,14 @@ fun FloatingBubbleView(
                         onClick = {
                             showMenu = false
                             onInstantTextScan()
+                        }
+                    )
+                    BubbleMenuItem(
+                        icon = Icons.Default.Screenshot,
+                        label = "📷 Instant Screenshot",
+                        onClick = {
+                            showMenu = false
+                            onScreenshotCapture()
                         }
                     )
                     BubbleMenuItem(

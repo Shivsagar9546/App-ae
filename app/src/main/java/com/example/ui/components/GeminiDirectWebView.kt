@@ -332,6 +332,20 @@ fun GeminiDirectWebView(
                         cookieManager.setAcceptThirdPartyCookies(this, true)
 
                         webViewClient = object : WebViewClient() {
+                            override fun onRenderProcessGone(view: WebView?, detail: android.webkit.RenderProcessGoneDetail?): Boolean {
+                                // CRITICAL FIX: Tell the system we handle this crash to prevent the host app from crashing.
+                                hasError = true
+                                isLoading = false
+                                try {
+                                    view?.let {
+                                        val parent = it.parent as? android.view.ViewGroup
+                                        parent?.removeView(it)
+                                        it.destroy()
+                                    }
+                                } catch (_: Exception) {}
+                                return true
+                            }
+
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                 isLoading = true
                                 hasError = false

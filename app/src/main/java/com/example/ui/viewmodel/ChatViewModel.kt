@@ -2,10 +2,13 @@ package com.example.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Rect
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import android.util.Base64
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
@@ -17,8 +20,6 @@ import com.example.data.ai.AiResult
 import com.example.data.local.ChatMessage
 import com.example.data.local.Conversation
 import com.example.data.preferences.AdminSettings
-import com.example.service.ScreenCaptureHelper
-import com.example.service.ScreenCapturePermissionActivity
 import com.example.service.VoiceRecognitionHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -41,7 +42,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val chatDao = app.database.chatDao()
     private val adminPrefs = app.adminPreferences
     private val aiRepository = AiRepository(adminPrefs)
-    private val screenCaptureHelper = ScreenCaptureHelper(application)
     val voiceHelper = VoiceRecognitionHelper(application)
 
     val adminSettings: StateFlow<AdminSettings> = adminPrefs.settingsFlow
@@ -370,28 +370,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun triggerScreenScan(context: Context, cropRect: Rect? = null) {
-        _statusMessage.value = "Requesting Screen Permission..."
-        ScreenCapturePermissionActivity.requestPermission(
-            context = context,
-            onGranted = { resultCode, data ->
-                viewModelScope.launch {
-                    _statusMessage.value = "Capturing screen frame..."
-                    val bitmap = screenCaptureHelper.captureFrame(resultCode, data, cropRect)
-                    if (bitmap != null) {
-                        _attachedBitmap.value = bitmap
-                        _statusMessage.value = null
-                        sendMessage("Scan and analyze this screen.", isScan = true)
-                    } else {
-                        _statusMessage.value = null
-                        Toast.makeText(context, "Screen capture failed or timed out", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            },
-            onDenied = {
-                _statusMessage.value = null
-                Toast.makeText(context, "Screen capture permission was denied", Toast.LENGTH_SHORT).show()
-            }
-        )
+        Toast.makeText(
+            context,
+            "Play Protect safety ke liye screen crop features ko hata diya gaya hai. Kripya normal screenshot lekar chat me directly upload karein!",
+            Toast.LENGTH_LONG
+        ).show()
     }
 
     fun renameConversation(id: String, newTitle: String) {

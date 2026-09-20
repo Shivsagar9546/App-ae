@@ -6,9 +6,10 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
@@ -35,15 +36,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Transparent helper activity for MediaProjection permission dialog -->
-        <activity
-            android:name=".service.ScreenCapturePermissionActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Transparent"
-            android:taskAffinity="com.example.floating.helper"
-            android:launchMode="singleInstance"
-            android:excludeFromRecents="true" />
-
         <!-- Transparent helper activity for Floating Assistant Gallery / Camera Pickers -->
         <activity
             android:name=".service.FloatingImagePickerActivity"
@@ -64,9 +56,9 @@
                 android:value="Floating AI Assistant overlay on other apps" />
         </service>
 
-        <!-- Zero-Dialog Instant Screenshot Accessibility Service -->
+        <!-- Accessibility Service for Instant Warning-Free Screen Capture -->
         <service
-            android:name=".service.OmniAccessibilityService"
+            android:name=".service.AccessibilityScreenshotService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:exported="true">
             <intent-filter>
@@ -76,6 +68,7 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+
     </application>
 
 </manifest>

@@ -127,9 +127,6 @@ fun ScreenAssistantHubScreen(
     val context = LocalContext.current
     var hasOverlayPermission by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
     var isServiceRunning by remember { mutableStateOf(FloatingAssistantService.isRunning()) }
-    var isAccessibilityEnabled by remember {
-        mutableStateOf(com.example.service.OmniAccessibilityService.isAccessibilityEnabled(context))
-    }
 
     val adminSettings by viewModel.adminSettings.collectAsState()
 
@@ -145,13 +142,14 @@ fun ScreenAssistantHubScreen(
         }
     }
 
+
+
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 hasOverlayPermission = Settings.canDrawOverlays(context)
                 isServiceRunning = FloatingAssistantService.isRunning()
-                isAccessibilityEnabled = com.example.service.OmniAccessibilityService.isAccessibilityEnabled(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -318,206 +316,6 @@ fun ScreenAssistantHubScreen(
             }
 
             // ==========================================
-            // PLAY PROTECT SAFE: INSTANT SCREEN AI & OCR
-            // ==========================================
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("safe_screen_ai_card")
-            ) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .background(
-                                        color = MaterialTheme.colorScheme.tertiaryContainer,
-                                        shape = CircleShape
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Bolt,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-
-                            Column {
-                                Text(
-                                    text = "Instant Screen AI & OCR Grabber",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
-                                )
-                                Text(
-                                    text = "Play Protect Safe • Fast On-Device ML",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.tertiary
-                                )
-                            }
-                        }
-
-                        // Badge / Status
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (isAccessibilityEnabled) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.tertiaryContainer,
-                            contentColor = if (isAccessibilityEnabled) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onTertiaryContainer
-                        ) {
-                            Text(
-                                text = if (isAccessibilityEnabled) "ZERO-POPUP ACTIVE" else "READY",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = "🚀 बिना किसी 'Start Recording' पॉपअप के डायरेक्ट स्क्रीन क्रॉप और सॉल्यूशन पाने के लिए Accessibility ऑन करें। इससे आप जब भी क्रॉप करेंगे, बिना किसी परमिशन डायलॉग के सीधे स्क्रीनशॉट कट जाएगा!",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = if (isAccessibilityEnabled) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surface,
-                        border = androidx.compose.foundation.BorderStroke(
-                            1.dp,
-                            if (isAccessibilityEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Icon(
-                                        imageVector = if (isAccessibilityEnabled) Icons.Default.CheckCircle else Icons.Default.Security,
-                                        contentDescription = null,
-                                        tint = if (isAccessibilityEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Text(
-                                        text = if (isAccessibilityEnabled) "Zero-Dialog Direct Mode: Active" else "Direct Screen Crop (No Popup)",
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = if (isAccessibilityEnabled)
-                                        "Recording dialogs are completely disabled. Instant crop works directly."
-                                    else
-                                        "Enable OmniAI in Settings to permanently remove 'Start recording or casting' popups.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Button(
-                                onClick = {
-                                    try {
-                                        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        }
-                                        context.startActivity(intent)
-                                    } catch (e: Exception) {
-                                        Toast.makeText(context, "Could not open Accessibility settings", Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isAccessibilityEnabled) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primary,
-                                    contentColor = if (isAccessibilityEnabled) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onPrimary
-                                )
-                            ) {
-                                Text(if (isAccessibilityEnabled) "Settings" else "Enable")
-                            }
-                        }
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = "💡 सुविधा की जानकारी (Features Guide):",
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-                            )
-                            Text(
-                                text = "• ⚡ Direct Crop: स्क्रीन पर बॉक्स बनाते ही बिना किसी परमिशन के तुरंत क्रॉप!",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Text(
-                                text = "• 📋 OCR Text Grabber: स्क्रीन के किसी भी हिस्से से टेक्स्ट तुरंत निकालें।",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Text(
-                                text = "• 🚀 Quick HUD: स्क्रीन पर तैरता हुआ तुरंत हल कार्ड।",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Ready to Use with Floating Bubble",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ==========================================
             // FLOATING ICON & AVATAR CUSTOMIZATION (USER REQUEST)
             // ==========================================
             Surface(
@@ -583,11 +381,10 @@ fun ScreenAssistantHubScreen(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 val previewAlpha = adminSettings.bubbleAlpha.coerceIn(0.15f, 1.0f)
-                                val previewAlphaPct = (previewAlpha * 100).toInt()
                                 Text(
-                                    text = "📱 LIVE PREVIEW • $previewAlphaPct% OPACITY",
+                                    text = "📱 LIVE PREVIEW",
                                     fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold,
+                                    fontWeight = FontWeight.Bold,
                                     color = Color.White.copy(alpha = 0.85f),
                                     letterSpacing = 1.sp
                                 )
@@ -710,9 +507,9 @@ fun ScreenAssistantHubScreen(
                         }
                     }
 
-                    // 1. Photo Picker Actions (User Photo Option)
+                    // Your Custom Photo / Avatar Image
                     Text(
-                        text = "1. Your Custom Photo / Avatar Image",
+                        text = "Your Custom Photo / Avatar Image",
                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -758,9 +555,9 @@ fun ScreenAssistantHubScreen(
                         }
                     }
 
-                    // 2. Preset AI Icons
+                    // Preset AI Icons
                     Text(
-                        text = "2. Or Choose Preset AI Icon / Mascot",
+                        text = "Preset AI Icon / Mascot",
                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -795,9 +592,9 @@ fun ScreenAssistantHubScreen(
                         }
                     }
 
-                    // 3. Shape & Style
+                    // Shape & Style
                     Text(
-                        text = "3. Bubble Shape",
+                        text = "Bubble Shape",
                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -826,10 +623,10 @@ fun ScreenAssistantHubScreen(
                         )
                     }
 
-                    // 4. Custom Text (if Pill style)
+                    // Custom Text (if Pill style)
                     if (adminSettings.bubbleStyle == "pill") {
                         Text(
-                            text = "4. Custom Label Text",
+                            text = "Custom Label Text",
                             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -863,9 +660,9 @@ fun ScreenAssistantHubScreen(
                         }
                     }
 
-                    // 5. Color Themes
+                    // Color Themes
                     Text(
-                        text = "5. Gradient Color Theme",
+                        text = "Gradient Color Theme",
                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -893,9 +690,9 @@ fun ScreenAssistantHubScreen(
                         }
                     }
 
-                    // 6. Size Selection
+                    // Size Selection
                     Text(
-                        text = "6. Size on Screen",
+                        text = "Size on Screen",
                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -925,28 +722,10 @@ fun ScreenAssistantHubScreen(
                     }
 
                     // 7. Bubble Transparency / Opacity (पारदर्शिता)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "7. Bubble Transparency & Opacity",
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        val alphaPct = (adminSettings.bubbleAlpha.coerceIn(0.15f, 1.0f) * 100).toInt()
-                        Text(
-                            text = "$alphaPct% ${if (alphaPct <= 30) "👻 Transparent" else if (alphaPct <= 70) "🌤️ Semi-Clear" else "🛡️ Solid"}",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-
                     Text(
-                        text = "बबल को ट्रांसपेरेंट (पारदर्शी) बनाएं ताकि बैकग्राउंड ऐप्स, आर्टिकल्स या वीडियो देखने में रुकावट न हो।",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = "Bubble Transparency",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
 
                     Slider(
@@ -955,30 +734,8 @@ fun ScreenAssistantHubScreen(
                             viewModel.updateAdminSettings(bubbleAlpha = newAlpha)
                         },
                         valueRange = 0.15f..1.0f,
-                        steps = 16,
                         modifier = Modifier.fillMaxWidth()
                     )
-
-                    // Quick Preset Chips
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        listOf(
-                            Triple(0.25f, "25%", "Ghost"),
-                            Triple(0.50f, "50%", "Semi"),
-                            Triple(0.75f, "75%", "Subtle"),
-                            Triple(1.00f, "100%", "Solid")
-                        ).forEach { (alphaVal, pctLabel, name) ->
-                            val isSelected = Math.abs(adminSettings.bubbleAlpha - alphaVal) < 0.08f
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = { viewModel.updateAdminSettings(bubbleAlpha = alphaVal) },
-                                label = { Text("$pctLabel $name", fontSize = 11.sp) },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
                 }
             }
 
@@ -1024,52 +781,31 @@ fun ScreenAssistantHubScreen(
                 color = MaterialTheme.colorScheme.onBackground
             )
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Button(
-                    onClick = {
-                        if (!Settings.canDrawOverlays(context)) {
-                            requestOverlayPermission(context)
+            Button(
+                onClick = {
+                    if (!Settings.canDrawOverlays(context)) {
+                        requestOverlayPermission(context)
+                    } else {
+                        val intent = Intent(context, FloatingAssistantService::class.java)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            context.startForegroundService(intent)
                         } else {
-                            val intent = Intent(context, FloatingAssistantService::class.java)
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                context.startForegroundService(intent)
-                            } else {
-                                context.startService(intent)
-                            }
-                            isServiceRunning = true
-                            Toast.makeText(context, "Floating Assistant Bubble launched with custom style!", Toast.LENGTH_SHORT).show()
+                            context.startService(intent)
                         }
-                    },
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .testTag("launch_bubble_button")
-                ) {
-                    Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Launch Bubble")
-                }
-
-                FilledTonalButton(
-                    onClick = {
-                        viewModel.triggerScreenScan(context)
-                        onNavigateBack()
-                    },
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .testTag("test_screen_scan_button")
-                ) {
-                    Icon(imageVector = Icons.Default.Screenshot, contentDescription = null)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Scan Screen")
-                }
+                        isServiceRunning = true
+                        Toast.makeText(context, "Floating Assistant Bubble launched with custom style!", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("launch_bubble_button")
+            ) {
+                Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Launch Bubble")
             }
 
             Spacer(modifier = Modifier.height(20.dp))

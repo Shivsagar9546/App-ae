@@ -88,7 +88,8 @@ class OpenAiApiClient {
             }
 
             rootJson.put("messages", messagesArray)
-            rootJson.put("temperature", 0.7)
+            rootJson.put("temperature", 0.2)
+            rootJson.put("max_tokens", 1024)
 
             val requestBody = rootJson.toString().toRequestBody(jsonMediaType)
             val request = Request.Builder()

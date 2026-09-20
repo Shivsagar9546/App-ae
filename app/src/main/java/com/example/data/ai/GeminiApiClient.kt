@@ -53,14 +53,14 @@ class GeminiApiClient {
             else -> emptyList()
         }
 
-        // Fast priority models according to current Gemini API standards: gemini-3.5-flash, gemini-flash-latest, etc.
-        val requestedModel = if (model.isNotBlank()) model else "gemini-3.5-flash"
+        // Fast priority models according to current Gemini API standards: gemini-1.5-flash is the speed king
+        val requestedModel = if (model.isNotBlank()) model else "gemini-1.5-flash"
         val modelsToTry = mutableListOf<String>().apply {
             add(requestedModel)
+            if (requestedModel != "gemini-1.5-flash") add("gemini-1.5-flash")
             if (requestedModel != "gemini-3.5-flash") add("gemini-3.5-flash")
             if (requestedModel != "gemini-flash-latest") add("gemini-flash-latest")
             if (requestedModel != "gemini-3.1-flash-lite-preview") add("gemini-3.1-flash-lite-preview")
-            if (requestedModel != "gemini-3.1-pro-preview") add("gemini-3.1-pro-preview")
         }.distinct()
 
         var lastErrorMsg = "Unable to reach Gemini servers."
@@ -131,8 +131,8 @@ class GeminiApiClient {
 
                 // Generation config: Low temperature for direct, fast and accurate responses
                 val genConfig = JSONObject()
-                genConfig.put("temperature", 0.3)
-                genConfig.put("maxOutputTokens", 2048)
+                genConfig.put("temperature", 0.1)
+                genConfig.put("maxOutputTokens", 1024)
 
                 rootJson.put("generationConfig", genConfig)
 

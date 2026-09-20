@@ -51,6 +51,31 @@ import com.example.ui.screens.FloatingPopUpView
 import com.example.ui.screens.FloatingQuickSolutionHudView
 import com.example.ui.screens.SelectedAreaCropOverlay
 import com.example.ui.theme.OmniAITheme
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -77,7 +102,6 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
 
     private lateinit var aiRepository: AiRepository
-    private lateinit var screenCaptureHelper: ScreenCaptureHelper
     private lateinit var voiceHelper: VoiceRecognitionHelper
     private var textToSpeech: TextToSpeech? = null
 
@@ -90,12 +114,16 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
 
     private var cropOverlayView: ComposeView? = null
     private var cropOverlayParams: WindowManager.LayoutParams? = null
+    private var cropBackgroundBitmap: Bitmap? = null
 
     private var ocrView: ComposeView? = null
     private var ocrParams: WindowManager.LayoutParams? = null
 
     private var hudView: ComposeView? = null
     private var hudParams: WindowManager.LayoutParams? = null
+
+    private var accessibilityPromptView: ComposeView? = null
+    private var accessibilityPromptParams: WindowManager.LayoutParams? = null
 
     // State flows for popup UI
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
@@ -109,6 +137,8 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
 
     private val _statusText = MutableStateFlow<String?>(null)
     val statusText: StateFlow<String?> = _statusText.asStateFlow()
+
+    private val _attachedImage = MutableStateFlow<Bitmap?>(null)
 
     // State flows for OCR Text Grabber (Feature 1)
     private val _ocrExtractedText = MutableStateFlow<String?>(null)
@@ -133,6 +163,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     override fun onCreate() {
         super.onCreate()
         try {
+            savedStateRegistryController.performAttach()
             savedStateRegistryController.performRestore(null)
         } catch (e: Exception) {}
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
@@ -142,7 +173,6 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val app = application as OmniAIApplication
         aiRepository = AiRepository(app.adminPreferences)
-        screenCaptureHelper = ScreenCaptureHelper(this)
         voiceHelper = VoiceRecognitionHelper(this)
 
         try {
@@ -152,8 +182,9 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         updateScreenDimensions()
         activeServiceInstance = this
 
-        startForegroundServiceNotification()
+        // Under Android 15, we must show the visible overlay window BEFORE starting foreground service to satisfy SYSTEM_ALERT_WINDOW background start rules.
         showBubble()
+        startForegroundServiceNotification()
     }
 
     override fun onInit(status: Int) {
@@ -232,24 +263,43 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val stopIntent = Intent(this, FloatingAssistantService::class.java).apply {
-            action = ACTION_STOP_SERVICE
-        }
         val stopPendingIntent = PendingIntent.getService(
             this,
             1,
-            stopIntent,
+            Intent(this, FloatingAssistantService::class.java).apply { action = ACTION_STOP_SERVICE },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val cropPendingIntent = PendingIntent.getService(
+            this,
+            2,
+            Intent(this, FloatingAssistantService::class.java).apply { action = ACTION_CROP },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val instantPendingIntent = PendingIntent.getService(
+            this,
+            3,
+            Intent(this, FloatingAssistantService::class.java).apply { action = ACTION_INSTANT },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val chatPendingIntent = PendingIntent.getService(
+            this,
+            4,
+            Intent(this, FloatingAssistantService::class.java).apply { action = ACTION_CHAT },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         return NotificationCompat.Builder(this, OmniAIApplication.CHANNEL_FLOATING_SERVICE)
-            .setContentTitle("OmniAI Assistant")
-            .setContentText("Background assistant active")
+            .setContentTitle("OmniAI Assistant Panel")
+            .setContentText("Direct access to active vision tools")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
-            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setSilent(true)
             .setOngoing(true)
+            .addAction(0, "✂️ Crop", cropPendingIntent)
+            .addAction(0, "⚡ Text", instantPendingIntent)
+            .addAction(0, "💬 Chat", chatPendingIntent)
+            .addAction(0, "❌ Exit", stopPendingIntent)
             .build()
     }
 
@@ -311,9 +361,20 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP_SERVICE) {
-            stopSelf()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_STOP_SERVICE -> {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_CROP -> {
+                startAreaCropFlow()
+            }
+            ACTION_INSTANT -> {
+                startOcrTextExtraction(null)
+            }
+            ACTION_CHAT -> {
+                showPopup()
+            }
         }
         return START_STICKY
     }
@@ -419,19 +480,22 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                             showPopup()
                         },
                         onInstantTextScan = {
-                            startInstantTextScan()
+                            showRemovedFeatureToast()
+                        },
+                        onScreenshotCapture = {
+                            captureScreenshotAndAttach()
                         },
                         onScanScreen = {
-                            startScreenScan(cropRect = null)
+                            showRemovedFeatureToast()
                         },
                         onAreaScan = {
-                            showCropOverlay()
+                            startAreaCropFlow()
                         },
                         onOcrGrabber = {
-                            startOcrTextExtraction(cropRect = null)
+                            showRemovedFeatureToast()
                         },
                         onQuickHud = {
-                            startQuickHudSolve(cropRect = null)
+                            showRemovedFeatureToast()
                         },
                         onVoiceClick = {
                             startVoiceQuery()
@@ -519,6 +583,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                 val msgs by _messages.collectAsState()
                 val isGen by _isGenerating.collectAsState()
                 val status by _statusText.collectAsState()
+                val attachedImg by _attachedImage.collectAsState()
 
                 OmniAITheme {
                     FloatingPopUpView(
@@ -529,19 +594,26 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                             sendMessage(text, img, isScan = false)
                         },
                         onInstantTextScan = {
-                            startInstantTextScan()
+                            Toast.makeText(this@FloatingAssistantService, "Instant Text Scan: Feature setup in progress", Toast.LENGTH_SHORT).show()
                         },
                         onScanScreen = {
-                            startScreenScan(cropRect = null)
+                            Toast.makeText(this@FloatingAssistantService, "Screen Scan: Feature setup in progress", Toast.LENGTH_SHORT).show()
                         },
                         onAreaScan = {
-                            showCropOverlay()
+                            startAreaCropFlow()
+                        },
+                        onScreenshotCapture = {
+                            captureScreenshotAndAttach()
+                        },
+                        externalAttachedBitmap = attachedImg,
+                        onClearExternalAttachedBitmap = {
+                            _attachedImage.value = null
                         },
                         onOcrGrabber = {
-                            startOcrTextExtraction(cropRect = null)
+                            Toast.makeText(this@FloatingAssistantService, "OCR Grabber: Feature setup in progress", Toast.LENGTH_SHORT).show()
                         },
                         onQuickHud = {
-                            startQuickHudSolve(cropRect = null)
+                            Toast.makeText(this@FloatingAssistantService, "Quick HUD: Feature setup in progress", Toast.LENGTH_SHORT).show()
                         },
                         onPickGalleryImage = { callback ->
                             FloatingImagePickerActivity.launchGalleryPicker(this@FloatingAssistantService) { bitmap ->
@@ -737,83 +809,93 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         safelyRemoveView(view)
     }
 
+    private fun showRemovedFeatureToast() {
+        Toast.makeText(
+            this,
+            "Play Protect safety ke liye screen crop features ko hata diya gaya hai. Kripya normal screenshot lekar chat me directly upload karein!",
+            Toast.LENGTH_LONG
+        ).show()
+    }
+
     fun startOcrTextExtraction(cropRect: Rect?) {
         hidePopup()
         hideBubble()
-        hideOcrGrabber()
+        hideQuickHud()
+
         _isOcrLoading.value = true
-        _ocrExtractedText.value = null
+        _ocrExtractedText.value = "Scanning screen and extracting text..."
+        showOcrGrabber()
 
         serviceScope.launch {
-            // Check if zero-dialog Accessibility capture is available
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && OmniAccessibilityService.isServiceRunning()) {
-                kotlinx.coroutines.delay(100)
-                val bitmap = OmniAccessibilityService.captureScreen(cropRect)
-                showOcrGrabber()
-
-                if (bitmap != null) {
-                    val prompt = "Extract all readable text, questions, options, captions, or paragraphs visible in this image accurately. Return only the extracted text line by line."
-                    val result = withContext(Dispatchers.IO) {
-                        aiRepository.askAi(
-                            messages = listOf(AiMessage(role = "user", text = prompt)),
-                            imageBitmap = bitmap,
+            kotlinx.coroutines.delay(200)
+            captureScreenshotHelper(
+                onSuccess = { fullBitmap ->
+                    val targetBmp = if (cropRect != null) {
+                        cropBitmap(fullBitmap, cropRect)
+                    } else {
+                        fullBitmap
+                    }
+                    
+                    serviceScope.launch(Dispatchers.IO) {
+                        val messages = listOf(
+                            AiMessage(
+                                role = "user",
+                                text = "Analyze this image and perform high-accuracy OCR. Extract and return ALL readable text from this image exactly as it appears. Keep it raw, without any conversational filler, explanations, or labels."
+                            )
+                        )
+                        val result = aiRepository.askAi(
+                            messages = messages,
+                            imageBitmap = targetBmp,
                             isScreenScan = true
                         )
-                    }
-                    _isOcrLoading.value = false
-                    when (result) {
-                        is AiResult.Success -> {
-                            _ocrExtractedText.value = result.text.trim()
-                        }
-                        is AiResult.Error -> {
-                            _ocrExtractedText.value = "Failed to extract text: ${result.message}"
-                        }
-                    }
-                } else {
-                    _isOcrLoading.value = false
-                    Toast.makeText(this@FloatingAssistantService, "Screen capture failed", Toast.LENGTH_SHORT).show()
-                }
-                return@launch
-            }
-
-            // Fallback to standard permission
-            ScreenCapturePermissionActivity.requestPermission(
-                context = this@FloatingAssistantService,
-                onGranted = { resultCode, data ->
-                    promoteToMediaProjectionFgs()
-                    serviceScope.launch {
-                        val bitmap = screenCaptureHelper.captureFrame(resultCode, data, cropRect)
-                        demoteFromMediaProjectionFgs()
-                        showOcrGrabber()
-
-                        if (bitmap != null) {
-                            val prompt = "Extract all readable text, questions, options, captions, or paragraphs visible in this image accurately. Return only the extracted text line by line."
-                            val result = withContext(Dispatchers.IO) {
-                                aiRepository.askAi(
-                                    messages = listOf(AiMessage(role = "user", text = prompt)),
-                                    imageBitmap = bitmap,
-                                    isScreenScan = true
-                                )
-                            }
+                        
+                        withContext(Dispatchers.Main) {
                             _isOcrLoading.value = false
                             when (result) {
                                 is AiResult.Success -> {
-                                    _ocrExtractedText.value = result.text.trim()
+                                    _ocrExtractedText.value = result.text
                                 }
                                 is AiResult.Error -> {
-                                    _ocrExtractedText.value = "Failed to extract text: ${result.message}"
+                                    _ocrExtractedText.value = "⚠️ Error: ${result.message}"
                                 }
                             }
-                        } else {
-                            _isOcrLoading.value = false
-                            Toast.makeText(this@FloatingAssistantService, "Screen capture failed", Toast.LENGTH_SHORT).show()
                         }
                     }
                 },
-                onDenied = {
-                    showBubble()
-                    _isOcrLoading.value = false
-                    Toast.makeText(this@FloatingAssistantService, "Screen capture permission required", Toast.LENGTH_SHORT).show()
+                onGalleryBackup = {
+                    FloatingImagePickerActivity.launchScreenCapture(this@FloatingAssistantService) { fullBitmap ->
+                        val targetBmp = if (cropRect != null) {
+                            cropBitmap(fullBitmap, cropRect)
+                        } else {
+                            fullBitmap
+                        }
+                        
+                        serviceScope.launch(Dispatchers.IO) {
+                            val messages = listOf(
+                                AiMessage(
+                                    role = "user",
+                                    text = "Analyze this image and perform high-accuracy OCR. Extract and return ALL readable text from this image exactly as it appears. Keep it raw, without any conversational filler, explanations, or labels."
+                                )
+                            )
+                            val result = aiRepository.askAi(
+                                messages = messages,
+                                imageBitmap = targetBmp,
+                                isScreenScan = true
+                            )
+                            
+                            withContext(Dispatchers.Main) {
+                                _isOcrLoading.value = false
+                                when (result) {
+                                    is AiResult.Success -> {
+                                        _ocrExtractedText.value = result.text
+                                    }
+                                    is AiResult.Error -> {
+                                        _ocrExtractedText.value = "⚠️ Error: ${result.message}"
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             )
         }
@@ -914,85 +996,82 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     fun startQuickHudSolve(cropRect: Rect?) {
         hidePopup()
         hideBubble()
-        hideQuickHud()
+        hideOcrGrabber()
+
         _isHudLoading.value = true
-        _hudSolutionText.value = null
-        _hudTitle.value = "Solving Screen..."
+        _hudSolutionText.value = "Analyzing screen and generating solution..."
+        showQuickHud()
 
         serviceScope.launch {
-            // Check if zero-dialog Accessibility capture is available
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && OmniAccessibilityService.isServiceRunning()) {
-                kotlinx.coroutines.delay(100)
-                val bitmap = OmniAccessibilityService.captureScreen(cropRect)
-                showQuickHud()
-
-                if (bitmap != null) {
-                    val prompt = "Give a concise, direct, accurate solution / answer and key steps for the question/problem visible on this screen. Be clear and quick."
-                    val result = withContext(Dispatchers.IO) {
-                        aiRepository.askAi(
-                            messages = listOf(AiMessage(role = "user", text = prompt)),
-                            imageBitmap = bitmap,
+            kotlinx.coroutines.delay(200)
+            captureScreenshotHelper(
+                onSuccess = { fullBitmap ->
+                    val targetBmp = if (cropRect != null) {
+                        cropBitmap(fullBitmap, cropRect)
+                    } else {
+                        fullBitmap
+                    }
+                    
+                    serviceScope.launch(Dispatchers.IO) {
+                        val messages = listOf(
+                            AiMessage(
+                                role = "user",
+                                text = "Identify the main question, problem, code, or image on the screen. Solve it step-by-step with clear, concise, and direct answers first, followed by clear explanations. Use markdown if formatting is helpful. Make it extremely brief to fit a small floating widget."
+                            )
+                        )
+                        val result = aiRepository.askAi(
+                            messages = messages,
+                            imageBitmap = targetBmp,
                             isScreenScan = true
                         )
-                    }
-                    _isHudLoading.value = false
-                    when (result) {
-                        is AiResult.Success -> {
-                            _hudTitle.value = "Instant Solution"
-                            _hudSolutionText.value = result.text.trim()
-                        }
-                        is AiResult.Error -> {
-                            _hudTitle.value = "Error Solving"
-                            _hudSolutionText.value = "⚠️ ${result.message}"
-                        }
-                    }
-                } else {
-                    _isHudLoading.value = false
-                    Toast.makeText(this@FloatingAssistantService, "Screen capture failed", Toast.LENGTH_SHORT).show()
-                }
-                return@launch
-            }
-
-            // Fallback to standard permission
-            ScreenCapturePermissionActivity.requestPermission(
-                context = this@FloatingAssistantService,
-                onGranted = { resultCode, data ->
-                    promoteToMediaProjectionFgs()
-                    serviceScope.launch {
-                        val bitmap = screenCaptureHelper.captureFrame(resultCode, data, cropRect)
-                        demoteFromMediaProjectionFgs()
-                        showQuickHud()
-
-                        if (bitmap != null) {
-                            val prompt = "Give a concise, direct, accurate solution / answer and key steps for the question/problem visible on this screen. Be clear and quick."
-                            val result = withContext(Dispatchers.IO) {
-                                aiRepository.askAi(
-                                    messages = listOf(AiMessage(role = "user", text = prompt)),
-                                    imageBitmap = bitmap,
-                                    isScreenScan = true
-                                )
-                            }
+                        
+                        withContext(Dispatchers.Main) {
                             _isHudLoading.value = false
                             when (result) {
                                 is AiResult.Success -> {
-                                    _hudTitle.value = "Instant Solution"
-                                    _hudSolutionText.value = result.text.trim()
+                                    _hudSolutionText.value = result.text
                                 }
                                 is AiResult.Error -> {
-                                    _hudTitle.value = "Error Solving"
-                                    _hudSolutionText.value = "⚠️ ${result.message}"
+                                    _hudSolutionText.value = "⚠️ Error: ${result.message}"
                                 }
                             }
-                        } else {
-                            _isHudLoading.value = false
-                            Toast.makeText(this@FloatingAssistantService, "Screen capture failed", Toast.LENGTH_SHORT).show()
                         }
                     }
                 },
-                onDenied = {
-                    showBubble()
-                    _isHudLoading.value = false
-                    Toast.makeText(this@FloatingAssistantService, "Screen capture permission required", Toast.LENGTH_SHORT).show()
+                onGalleryBackup = {
+                    FloatingImagePickerActivity.launchScreenCapture(this@FloatingAssistantService) { fullBitmap ->
+                        val targetBmp = if (cropRect != null) {
+                            cropBitmap(fullBitmap, cropRect)
+                        } else {
+                            fullBitmap
+                        }
+                        
+                        serviceScope.launch(Dispatchers.IO) {
+                            val messages = listOf(
+                                AiMessage(
+                                    role = "user",
+                                    text = "Identify the main question, problem, code, or image on the screen. Solve it step-by-step with clear, concise, and direct answers first, followed by clear explanations. Use markdown if formatting is helpful. Make it extremely brief to fit a small floating widget."
+                                )
+                            )
+                            val result = aiRepository.askAi(
+                                messages = messages,
+                                imageBitmap = targetBmp,
+                                isScreenScan = true
+                            )
+                            
+                            withContext(Dispatchers.Main) {
+                                _isHudLoading.value = false
+                                when (result) {
+                                    is AiResult.Success -> {
+                                        _hudSolutionText.value = result.text
+                                    }
+                                    is AiResult.Error -> {
+                                        _hudSolutionText.value = "⚠️ Error: ${result.message}"
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             )
         }
@@ -1002,20 +1081,66 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     // AREA CROP SELECTOR OVERLAY
     // ==========================================
 
-    fun showCropOverlay() {
+    fun captureScreenshotAndAttach() {
         hidePopup()
         hideBubble()
         hideOcrGrabber()
         hideQuickHud()
 
-        if (cropOverlayView != null) {
-            try {
-                cropOverlayView?.visibility = View.VISIBLE
-                return
-            } catch (e: Exception) {
-                hideCropOverlay()
-            }
+        serviceScope.launch {
+            kotlinx.coroutines.delay(200)
+            captureScreenshotHelper(
+                onSuccess = { bitmap ->
+                    _attachedImage.value = bitmap
+                    showPopup()
+                },
+                onGalleryBackup = {
+                    FloatingImagePickerActivity.launchScreenCapture(this@FloatingAssistantService) { bitmap ->
+                        _attachedImage.value = bitmap
+                        showPopup()
+                    }
+                }
+            )
         }
+    }
+
+    fun startAreaCropFlow() {
+        hidePopup()
+        hideBubble()
+        hideOcrGrabber()
+        hideQuickHud()
+
+        serviceScope.launch {
+            kotlinx.coroutines.delay(200)
+            captureScreenshotHelper(
+                onSuccess = { bitmap ->
+                    showCropOverlay(bitmap)
+                },
+                onGalleryBackup = {
+                    FloatingImagePickerActivity.launchScreenCapture(this@FloatingAssistantService) { bitmap ->
+                        showCropOverlay(bitmap)
+                    }
+                }
+            )
+        }
+    }
+
+    private fun cropBitmap(original: Bitmap, rect: Rect): Bitmap {
+        val left = rect.left.coerceIn(0, original.width - 1)
+        val top = rect.top.coerceIn(0, original.height - 1)
+        val right = rect.right.coerceIn(left + 1, original.width)
+        val bottom = rect.bottom.coerceIn(top + 1, original.height)
+        val width = (right - left).coerceAtLeast(1)
+        val height = (bottom - top).coerceAtLeast(1)
+        return Bitmap.createBitmap(original, left, top, width, height)
+    }
+
+    fun showCropOverlay(bitmap: Bitmap) {
+        cropBackgroundBitmap = bitmap
+        hidePopup()
+        hideBubble()
+        hideOcrGrabber()
+        hideQuickHud()
 
         val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -1042,9 +1167,26 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             setContent {
                 OmniAITheme {
                     SelectedAreaCropOverlay(
+                        backgroundImage = cropBackgroundBitmap,
                         onAreaSelected = { rect ->
                             hideCropOverlay()
-                            startScreenScan(cropRect = rect)
+                            if (rect != null) {
+                                val bg = cropBackgroundBitmap
+                                if (bg != null) {
+                                    try {
+                                        val cropped = cropBitmap(bg, rect)
+                                        _attachedImage.value = cropped
+                                        showPopup()
+                                    } catch (e: Exception) {
+                                        Toast.makeText(this@FloatingAssistantService, "Cropping failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                        showPopup()
+                                    }
+                                } else {
+                                    showPopup()
+                                }
+                            } else {
+                                showPopup()
+                            }
                         },
                         onCancel = {
                             hideCropOverlay()
@@ -1074,73 +1216,39 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
      * Reads screen text directly using fast on-device screen capture and OCR text extraction.
      */
     fun startInstantTextScan() {
-        startOcrTextExtraction(cropRect = null)
+        startOcrTextExtraction(null)
     }
 
-    /**
-     * Captures the screen (or cropped region) and analyzes it with AI.
-     * Uses OmniAccessibilityService for instant 100% zero-dialog captures.
-     * Falls back to standard MediaProjection if accessibility service is not yet enabled.
-     */
     fun startScreenScan(cropRect: Rect?) {
-        _statusText.value = "Preparing Screen Capture..."
         hidePopup()
         hideBubble()
         hideOcrGrabber()
         hideQuickHud()
 
         serviceScope.launch {
-            // Check if zero-dialog Accessibility capture is available
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && OmniAccessibilityService.isServiceRunning()) {
-                _statusText.value = "Capturing screen area..."
-                // Small delay to let overlay views fully disappear before snapping
-                kotlinx.coroutines.delay(100)
-                val bitmap = OmniAccessibilityService.captureScreen(cropRect)
-                showPopup()
-
-                if (bitmap != null) {
-                    _statusText.value = "Analyzing screen with AI..."
-                    sendScreenAnalysisRequest(bitmap, prompt = "Scan and solve/explain this screen content accurately.")
-                } else {
-                    _statusText.value = null
-                    Toast.makeText(this@FloatingAssistantService, "Could not capture screen area", Toast.LENGTH_SHORT).show()
-                }
-                return@launch
-            }
-
-            // If accessibility is not turned on in system settings, explain or fallback
-            if (!OmniAccessibilityService.isAccessibilityEnabled(this@FloatingAssistantService)) {
-                Toast.makeText(
-                    this@FloatingAssistantService,
-                    "Tip: Enable OmniAI in Accessibility Settings to eliminate all recording popups!",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-
-            // Fallback to MediaProjection
-            ScreenCapturePermissionActivity.requestPermission(
-                context = this@FloatingAssistantService,
-                onGranted = { resultCode, data ->
-                    promoteToMediaProjectionFgs()
-                    serviceScope.launch {
-                        _statusText.value = "Capturing screen..."
-                        val bitmap = screenCaptureHelper.captureFrame(resultCode, data, cropRect)
-                        demoteFromMediaProjectionFgs()
-                        showPopup()
-
-                        if (bitmap != null) {
-                            _statusText.value = "Analyzing screen with AI..."
-                            sendScreenAnalysisRequest(bitmap, prompt = "Scan and solve/explain this screen content accurately.")
-                        } else {
-                            _statusText.value = null
-                            Toast.makeText(this@FloatingAssistantService, "Screen capture failed or timed out", Toast.LENGTH_SHORT).show()
-                        }
+            kotlinx.coroutines.delay(200)
+            captureScreenshotHelper(
+                onSuccess = { fullBitmap ->
+                    val targetBmp = if (cropRect != null) {
+                        cropBitmap(fullBitmap, cropRect)
+                    } else {
+                        fullBitmap
                     }
-                },
-                onDenied = {
+                    _attachedImage.value = targetBmp
                     showPopup()
-                    _statusText.value = null
-                    Toast.makeText(this@FloatingAssistantService, "Screen capture permission denied", Toast.LENGTH_SHORT).show()
+                    sendMessage("Analyze this captured area of my screen and explain it in detail.", targetBmp, isScan = true)
+                },
+                onGalleryBackup = {
+                    FloatingImagePickerActivity.launchScreenCapture(this@FloatingAssistantService) { fullBitmap ->
+                        val targetBmp = if (cropRect != null) {
+                            cropBitmap(fullBitmap, cropRect)
+                        } else {
+                            fullBitmap
+                        }
+                        _attachedImage.value = targetBmp
+                        showPopup()
+                        sendMessage("Analyze this captured area of my screen and explain it in detail.", targetBmp, isScan = true)
+                    }
                 }
             )
         }
@@ -1418,7 +1526,164 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         )
     }
 
+    fun showAccessibilityPromptDialog(onGalleryBackup: () -> Unit) {
+        if (!Settings.canDrawOverlays(this)) return
+        hideAccessibilityPromptDialog()
+
+        val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+
+        accessibilityPromptParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            layoutFlag,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+            PixelFormat.TRANSLUCENT
+        )
+
+        accessibilityPromptView = ComposeView(this).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+            setViewTreeLifecycleOwner(this@FloatingAssistantService)
+            setViewTreeSavedStateRegistryOwner(this@FloatingAssistantService)
+            setViewTreeViewModelStoreOwner(this@FloatingAssistantService)
+            setContent {
+                OmniAITheme {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.6f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth(0.85f)
+                                .padding(16.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .padding(24.dp)
+                                    .fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Settings,
+                                    contentDescription = "Settings",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = "Instant Screen Crop Enable Karein",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = "Google ke \"Start recording\" warning dialogs ko permanently bypass karne aur instant single-click screen crop/capture ke liye please Settings me jaakar OmniAI ki Accessibility Service ko ON karein. Aap direct standard screen capture bhee use kar sakte hain.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(24.dp))
+                                Button(
+                                    onClick = {
+                                        hideAccessibilityPromptDialog()
+                                        showBubble()
+                                        try {
+                                            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                            }
+                                            startActivity(intent)
+                                        } catch (e: Exception) {
+                                            Toast.makeText(this@FloatingAssistantService, "Could not open settings: ${e.message}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("Settings me ON karein (No Warning Dialog)")
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                TextButton(
+                                    onClick = {
+                                        hideAccessibilityPromptDialog()
+                                        onGalleryBackup()
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Normal Screen Capture (Standard)", color = MaterialTheme.colorScheme.primary)
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                TextButton(
+                                    onClick = {
+                                        hideAccessibilityPromptDialog()
+                                        showBubble()
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Cancel", color = MaterialTheme.colorScheme.outline)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        try {
+            windowManager.addView(accessibilityPromptView, accessibilityPromptParams)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun hideAccessibilityPromptDialog() {
+        accessibilityPromptView?.let {
+            try {
+                windowManager.removeView(it)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            accessibilityPromptView = null
+        }
+    }
+
+    private fun captureScreenshotHelper(
+        onSuccess: (Bitmap) -> Unit,
+        onGalleryBackup: () -> Unit
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && AccessibilityScreenshotService.isEnabled()) {
+            val mainExecutor = java.util.concurrent.Executor { command ->
+                serviceScope.launch(Dispatchers.Main) {
+                    command.run()
+                }
+            }
+            AccessibilityScreenshotService.captureScreenSilently(
+                mainExecutor,
+                onSuccess = { bitmap ->
+                    onSuccess(bitmap)
+                },
+                onFailure = { error ->
+                    Toast.makeText(this, "Failed: $error", Toast.LENGTH_SHORT).show()
+                    onGalleryBackup()
+                }
+            )
+        } else {
+            showAccessibilityPromptDialog(onGalleryBackup)
+        }
+    }
+
     override fun onDestroy() {
+        hideAccessibilityPromptDialog()
         super.onDestroy()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
@@ -1452,6 +1717,9 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
     companion object {
         const val NOTIFICATION_ID = 101
         const val ACTION_STOP_SERVICE = "action_stop_floating_service"
+        const val ACTION_CROP = "com.example.service.ACTION_CROP"
+        const val ACTION_INSTANT = "com.example.service.ACTION_INSTANT"
+        const val ACTION_CHAT = "com.example.service.ACTION_CHAT"
         var activeServiceInstance: FloatingAssistantService? = null
             private set
 
