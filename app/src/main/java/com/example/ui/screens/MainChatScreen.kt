@@ -359,7 +359,7 @@ fun MainChatScreen(
                             verticalArrangement = Arrangement.spacedBy(14.dp),
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp)
                         ) {
-                            items(messages, key = { it.id }) { msg ->
+                            items(messages, key = { "${it.id}_${it.role}_${it.timestamp}" }) { msg ->
                                 val isThisMsgSpeaking = isTtsSpeaking && (ttsSpeakingId == msg.id.toString())
                                 ChatMessageCard(
                                     message = msg,
@@ -942,10 +942,27 @@ private fun ChatMessageCard(
 
                     // Display attached / scanned image if present
                     if (!message.imageBase64.isNullOrBlank()) {
-                        com.example.ui.components.Base64ImageView(
-                            base64String = message.imageBase64,
-                            contentDescription = if (message.isScreenScan) "Screen capture" else "Uploaded photo"
-                        )
+                        val imagesList = message.imageBase64.split("|").filter { it.isNotBlank() }
+                        if (imagesList.size > 1) {
+                            androidx.compose.foundation.lazy.LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            ) {
+                                items(imagesList) { imgPath ->
+                                    com.example.ui.components.Base64ImageView(
+                                        base64String = imgPath,
+                                        contentDescription = if (message.isScreenScan) "Screen capture" else "Uploaded photo",
+                                        modifier = Modifier.size(120.dp).clip(RoundedCornerShape(8.dp)),
+                                        fillWidth = false
+                                    )
+                                }
+                            }
+                        } else if (imagesList.isNotEmpty()) {
+                            com.example.ui.components.Base64ImageView(
+                                base64String = imagesList[0],
+                                contentDescription = if (message.isScreenScan) "Screen capture" else "Uploaded photo"
+                            )
+                        }
                     }
 
                     // Message Text / Markdown

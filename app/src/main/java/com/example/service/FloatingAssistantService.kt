@@ -590,8 +590,8 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         messages = msgs,
                         isGenerating = isGen,
                         statusText = status,
-                        onSendMessage = { text, img ->
-                            sendMessage(text, img, isScan = false)
+                        onSendMessage = { text, img, list ->
+                            sendMessage(text, img, list, isScan = false)
                         },
                         onInstantTextScan = {
                             Toast.makeText(this@FloatingAssistantService, "Instant Text Scan: Feature setup in progress", Toast.LENGTH_SHORT).show()
@@ -1253,7 +1253,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                     } else {
                         fullBitmap
                     }
-                    _attachedImage.value = targetBmp
+                    _attachedImage.value = null
                     showPopup()
                     sendMessage("Analyze this captured area of my screen and explain it in detail.", targetBmp, isScan = true)
                 },
@@ -1266,7 +1266,7 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                         } else {
                             fullBitmap
                         }
-                        _attachedImage.value = targetBmp
+                        _attachedImage.value = null
                         showPopup()
                         sendMessage("Analyze this captured area of my screen and explain it in detail.", targetBmp, isScan = true)
                     }
@@ -1342,7 +1342,6 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
                     isScreenScan = true
                 )
             }
-            bitmap.recycle()
 
             _isGenerating.value = false
             _statusText.value = null
@@ -1381,10 +1380,10 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
         }
     }
 
-    fun sendMessage(text: String, imageBitmap: Bitmap? = null, isScan: Boolean = false) {
-        if (text.isBlank() && imageBitmap == null) return
+    fun sendMessage(text: String, imageBitmap: Bitmap? = null, imageBitmaps: List<Bitmap> = emptyList(), isScan: Boolean = false) {
+        if (text.isBlank() && imageBitmap == null && imageBitmaps.isEmpty()) return
 
-        val promptText = if (text.isBlank() && imageBitmap != null) {
+        val promptText = if (text.isBlank() && (imageBitmap != null || imageBitmaps.isNotEmpty())) {
             "Explain this photo and solve or describe what is shown here."
         } else {
             text
@@ -1396,28 +1395,38 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             val app = application as OmniAIApplication
             val convId = _currentConversationId.value
 
+            val allBitmaps = when {
+                imageBitmaps.isNotEmpty() -> imageBitmaps
+                imageBitmap != null -> listOf(imageBitmap)
+                else -> emptyList()
+            }
+
             val imageBase64 = withContext(Dispatchers.IO) {
-                imageBitmap?.let { bitmap ->
-                    try {
-                        val maxDim = 800
-                        var scaled = bitmap
-                        if (bitmap.width > maxDim || bitmap.height > maxDim) {
-                            val ratio = bitmap.width.toFloat() / bitmap.height.toFloat()
-                            val newW = if (bitmap.width > bitmap.height) maxDim else (maxDim * ratio).toInt()
-                            val newH = if (bitmap.width > bitmap.height) (maxDim / ratio).toInt() else maxDim
-                            scaled = Bitmap.createScaledBitmap(bitmap, newW.coerceAtLeast(1), newH.coerceAtLeast(1), true)
+                if (allBitmaps.isNotEmpty()) {
+                    allBitmaps.mapNotNull { bitmap ->
+                        try {
+                            val maxDim = 800
+                            var scaled = bitmap
+                            if (bitmap.width > maxDim || bitmap.height > maxDim) {
+                                val ratio = bitmap.width.toFloat() / bitmap.height.toFloat()
+                                val newW = if (bitmap.width > bitmap.height) maxDim else (maxDim * ratio).toInt()
+                                val newH = if (bitmap.width > bitmap.height) (maxDim / ratio).toInt() else maxDim
+                                scaled = Bitmap.createScaledBitmap(bitmap, newW.coerceAtLeast(1), newH.coerceAtLeast(1), true)
+                            }
+                            val cacheFile = java.io.File(app.cacheDir, "img_${java.util.UUID.randomUUID()}.jpg")
+                            java.io.FileOutputStream(cacheFile).use { fos ->
+                                scaled.compress(Bitmap.CompressFormat.JPEG, 75, fos)
+                            }
+                            if (scaled != bitmap) {
+                                scaled.recycle()
+                            }
+                            cacheFile.absolutePath
+                        } catch (e: Exception) {
+                            null
                         }
-                        val cacheFile = java.io.File(app.cacheDir, "img_${java.util.UUID.randomUUID()}.jpg")
-                        java.io.FileOutputStream(cacheFile).use { fos ->
-                            scaled.compress(Bitmap.CompressFormat.JPEG, 75, fos)
-                        }
-                        if (scaled != bitmap) {
-                            scaled.recycle()
-                        }
-                        cacheFile.absolutePath
-                    } catch (e: Exception) {
-                        null
-                    }
+                    }.joinToString("|").ifBlank { null }
+                } else {
+                    null
                 }
             }
 
@@ -1447,17 +1456,17 @@ class FloatingAssistantService : Service(), LifecycleOwner, SavedStateRegistryOw
             }
 
             val aiMessages = _messages.value.map {
-                AiMessage(role = it.role, text = it.text)
+                AiMessage(role = it.role, text = it.text, imageBase64 = it.imageBase64)
             }
 
             val result = withContext(Dispatchers.IO) {
                 aiRepository.askAi(
                     messages = aiMessages,
                     imageBitmap = imageBitmap,
+                    imageBitmaps = allBitmaps,
                     isScreenScan = isScan
                 )
             }
-            imageBitmap?.recycle()
 
             _isGenerating.value = false
 

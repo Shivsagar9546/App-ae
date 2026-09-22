@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -58,6 +59,21 @@ import android.content.Intent
 import android.widget.Toast
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import android.net.Uri
+import android.provider.MediaStore
+import android.content.ContentUris
+import android.content.Context
+import android.graphics.BitmapFactory
+import android.os.Build
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.items
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -107,7 +123,7 @@ fun FloatingPopUpView(
     messages: List<ChatMessage>,
     isGenerating: Boolean,
     statusText: String?,
-    onSendMessage: (String, Bitmap?) -> Unit,
+    onSendMessage: (String, Bitmap?, List<Bitmap>) -> Unit,
     onInstantTextScan: () -> Unit = {},
     onScanScreen: () -> Unit = {},
     onAreaScan: () -> Unit,
@@ -130,7 +146,7 @@ fun FloatingPopUpView(
     onClearExternalAttachedBitmap: () -> Unit = {}
 ) {
     var inputText by remember { mutableStateOf("") }
-    var attachedBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var attachedBitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
     var currentlySpeakingText by remember { mutableStateOf<String?>(null) }
     var windowAlpha by remember { mutableStateOf(1.0f) }
     var isTransparencySliderOpen by remember { mutableStateOf(false) }
@@ -138,9 +154,70 @@ fun FloatingPopUpView(
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
 
+    var showInAppGallery by remember { mutableStateOf(false) }
+    var localImages by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var isQueryingImages by remember { mutableStateOf(false) }
+    var imageLoadingUri by remember { mutableStateOf<Uri?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+
+    LaunchedEffect(showInAppGallery) {
+        if (showInAppGallery) {
+            isQueryingImages = true
+            val uris = withContext(Dispatchers.IO) {
+                val list = mutableListOf<Uri>()
+                val uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                val projection = arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_ADDED)
+                val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+                try {
+                    context.contentResolver.query(uri, projection, null, null, sortOrder)?.use { cursor ->
+                        val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                        var count = 0
+                        while (cursor.moveToNext() && count < 60) {
+                            val id = cursor.getLong(idColumn)
+                            val contentUri = ContentUris.withAppendedId(uri, id)
+                            list.add(contentUri)
+                            count++
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+                list
+            }
+            localImages = uris
+            isQueryingImages = false
+        }
+    }
+
+    fun loadUriAsBitmap(uri: Uri): Bitmap? {
+        return try {
+            val inputStream = context.contentResolver.openInputStream(uri)
+            val original = BitmapFactory.decodeStream(inputStream)
+            inputStream?.close()
+            original?.let { bmp ->
+                val maxDimension = 1024
+                if (bmp.width > maxDimension || bmp.height > maxDimension) {
+                    val ratio = bmp.width.toFloat() / bmp.height.toFloat()
+                    val width = if (ratio > 1) maxDimension else (maxDimension * ratio).toInt()
+                    val height = if (ratio > 1) (maxDimension / ratio).toInt() else maxDimension
+                    val scaled = Bitmap.createScaledBitmap(bmp, width, height, true)
+                    if (scaled != bmp) {
+                        bmp.recycle()
+                    }
+                    scaled
+                } else {
+                    bmp
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
     LaunchedEffect(externalAttachedBitmap) {
         if (externalAttachedBitmap != null) {
-            attachedBitmap = externalAttachedBitmap
+            attachedBitmaps = (attachedBitmaps + externalAttachedBitmap).take(10)
             onClearExternalAttachedBitmap()
         }
     }
@@ -459,7 +536,7 @@ fun FloatingPopUpView(
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                 contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 10.dp)
                             ) {
-                                items(messages, key = { it.id }) { msg ->
+                                items(messages, key = { "${it.id}_${it.role}_${it.timestamp}" }) { msg ->
                                     FloatingMessageBubble(
                                         msg = msg,
                                         isSpeaking = (currentlySpeakingText == msg.text),
@@ -508,17 +585,17 @@ fun FloatingPopUpView(
                     }
 
                     // Quick Action Chips (Explain, Solve, Translate, etc.) - Only visible when empty
-                    if (messages.isEmpty() && attachedBitmap == null) {
+                    if (messages.isEmpty() && attachedBitmaps.isEmpty()) {
                         QuickActionChips(
                             onActionSelected = { prompt ->
-                                onSendMessage(prompt, attachedBitmap)
-                                attachedBitmap = null
+                                onSendMessage(prompt, null, attachedBitmaps)
+                                attachedBitmaps = emptyList()
                             }
                         )
                     }
 
-                    // Attached Image Preview Bar (if user picked an image)
-                    AnimatedVisibility(visible = attachedBitmap != null) {
+                    // Attached Images Preview Bar (if user picked any images)
+                    AnimatedVisibility(visible = attachedBitmaps.isNotEmpty()) {
                         Surface(
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
                             shape = RoundedCornerShape(14.dp),
@@ -530,60 +607,67 @@ fun FloatingPopUpView(
                                 .fillMaxWidth()
                                 .padding(horizontal = 10.dp, vertical = 4.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    attachedBitmap?.let { bmp ->
-                                        Image(
-                                            bitmap = bmp.asImageBitmap(),
-                                            contentDescription = "Attached image preview",
-                                            modifier = Modifier
-                                                .size(42.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .border(
-                                                    1.dp,
-                                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                                                    RoundedCornerShape(8.dp)
-                                                ),
-                                            contentScale = ContentScale.Crop
-                                        )
-                                    }
-                                    Column {
-                                        Text(
-                                            text = "Image Selected",
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Text(
-                                            text = "Type question or hit send to analyze",
-                                            fontSize = 10.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                                        )
-                                    }
-                                }
-
-                                IconButton(
-                                    onClick = { attachedBitmap = null },
-                                    modifier = Modifier
-                                        .size(28.dp)
-                                        .background(
-                                            MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
-                                            CircleShape
-                                        )
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Remove attached photo",
-                                        modifier = Modifier.size(16.dp),
-                                        tint = MaterialTheme.colorScheme.error
+                                    Text(
+                                        text = "Attached Photos (${attachedBitmaps.size}/10)",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                    Text(
+                                        text = "Clear All",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.clickable { attachedBitmaps = emptyList() }
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                androidx.compose.foundation.lazy.LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    itemsIndexed(attachedBitmaps) { index, bmp ->
+                                        Box(
+                                            modifier = Modifier.size(56.dp)
+                                        ) {
+                                            Image(
+                                                bitmap = bmp.asImageBitmap(),
+                                                contentDescription = "Attached photo preview",
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .border(
+                                                        1.dp,
+                                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                                                        RoundedCornerShape(8.dp)
+                                                    ),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                            IconButton(
+                                                onClick = {
+                                                    val mutable = attachedBitmaps.toMutableList()
+                                                    mutable.removeAt(index)
+                                                    attachedBitmaps = mutable
+                                                },
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .size(16.dp)
+                                                    .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = "Remove photo",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(10.dp)
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -673,11 +757,24 @@ fun FloatingPopUpView(
                                     Text("✂️ Crop", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
 
-                                // 2. Gallery Photo Upload
+                                 // 2. Gallery Photo Upload
                                 Button(
                                     onClick = {
-                                        onPickGalleryImage { bmp ->
-                                            attachedBitmap = bmp
+                                        val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                            androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_MEDIA_IMAGES) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                        } else {
+                                            androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                        }
+                                        if (hasPermission) {
+                                            showInAppGallery = true
+                                        } else {
+                                            com.example.service.FloatingImagePickerActivity.launchPermissionRequest(context) { isGranted ->
+                                                if (isGranted) {
+                                                    showInAppGallery = true
+                                                } else {
+                                                    Toast.makeText(context, "Permission is required to choose photos.", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
                                         }
                                     },
                                     shape = RoundedCornerShape(10.dp),
@@ -709,8 +806,21 @@ fun FloatingPopUpView(
                                 // Direct Image Attachment (+) / Photo Button from Gallery
                                 IconButton(
                                     onClick = {
-                                        onPickGalleryImage { bmp ->
-                                            attachedBitmap = bmp
+                                        val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                            androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_MEDIA_IMAGES) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                        } else {
+                                            androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                        }
+                                        if (hasPermission) {
+                                            showInAppGallery = true
+                                        } else {
+                                            com.example.service.FloatingImagePickerActivity.launchPermissionRequest(context) { isGranted ->
+                                                if (isGranted) {
+                                                    showInAppGallery = true
+                                                } else {
+                                                    Toast.makeText(context, "Permission is required to choose photos.", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
                                         }
                                     },
                                     modifier = Modifier
@@ -731,7 +841,7 @@ fun FloatingPopUpView(
                                     onValueChange = { inputText = it },
                                     placeholder = {
                                         Text(
-                                            text = if (attachedBitmap != null) "Ask about this photo..." else "Ask about screen or type...",
+                                            text = if (attachedBitmaps.isNotEmpty()) "Ask about these photos..." else "Ask about screen or type...",
                                             fontSize = 13.sp
                                         )
                                     },
@@ -769,13 +879,13 @@ fun FloatingPopUpView(
                                 FilledIconButton(
                                     onClick = {
                                         val prompt = inputText.trim()
-                                        if (prompt.isNotBlank() || attachedBitmap != null) {
-                                            onSendMessage(prompt, attachedBitmap)
+                                        if (prompt.isNotBlank() || attachedBitmaps.isNotEmpty()) {
+                                            onSendMessage(prompt, null, attachedBitmaps)
                                             inputText = ""
-                                            attachedBitmap = null
+                                            attachedBitmaps = emptyList()
                                         }
                                     },
-                                    enabled = (inputText.isNotBlank() || attachedBitmap != null) && !isGenerating,
+                                    enabled = (inputText.isNotBlank() || attachedBitmaps.isNotEmpty()) && !isGenerating,
                                     modifier = Modifier
                                         .size(38.dp)
                                         .testTag("popup_send_button"),
@@ -818,6 +928,145 @@ fun FloatingPopUpView(
                 )
             }
 
+            AnimatedVisibility(
+                visible = showInAppGallery,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(12.dp)
+                    ) {
+                        // Title Bar
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PhotoLibrary,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = "Select Photo",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            IconButton(
+                                onClick = { showInAppGallery = false },
+                                colors = IconButtonDefaults.iconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                )
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close Gallery",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        if (isQueryingImages) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator()
+                            }
+                        } else if (localImages.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "No photos found on device.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        } else {
+                            // Photos Grid
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(3),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                items(localImages) { uri ->
+                                    val isCurrentLoading = imageLoadingUri == uri
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(100.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                                            .clickable(enabled = imageLoadingUri == null) {
+                                                imageLoadingUri = uri
+                                                coroutineScope.launch(Dispatchers.IO) {
+                                                    val bmp = loadUriAsBitmap(uri)
+                                                    withContext(Dispatchers.Main) {
+                                                        if (bmp != null) {
+                                                            if (attachedBitmaps.size < 10) {
+                                                                attachedBitmaps = (attachedBitmaps + bmp).take(10)
+                                                                Toast.makeText(context, "Attached (${attachedBitmaps.size}/10)", Toast.LENGTH_SHORT).show()
+                                                            } else {
+                                                                Toast.makeText(context, "Maximum 10 images can be attached", Toast.LENGTH_SHORT).show()
+                                                            }
+                                                        } else {
+                                                            Toast.makeText(context, "Could not load image", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                        imageLoadingUri = null
+                                                        showInAppGallery = false
+                                                    }
+                                                }
+                                            }
+                                    ) {
+                                        coil.compose.AsyncImage(
+                                            model = uri,
+                                            contentDescription = "Device Photo",
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+
+                                        if (isCurrentLoading) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .background(Color.Black.copy(alpha = 0.5f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                CircularProgressIndicator(
+                                                    color = Color.White,
+                                                    modifier = Modifier.size(24.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -877,10 +1126,27 @@ private fun FloatingMessageBubble(
                 }
 
                 if (!msg.imageBase64.isNullOrBlank()) {
-                    com.example.ui.components.Base64ImageView(
-                        base64String = msg.imageBase64,
-                        contentDescription = "Screen capture preview"
-                    )
+                    val imagesList = msg.imageBase64.split("|").filter { it.isNotBlank() }
+                    if (imagesList.size > 1) {
+                        androidx.compose.foundation.lazy.LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        ) {
+                            items(imagesList) { imgPath ->
+                                com.example.ui.components.Base64ImageView(
+                                    base64String = imgPath,
+                                    contentDescription = "Uploaded photo preview",
+                                    modifier = Modifier.size(90.dp).clip(RoundedCornerShape(6.dp)),
+                                    fillWidth = false
+                                )
+                            }
+                        }
+                    } else if (imagesList.isNotEmpty()) {
+                        com.example.ui.components.Base64ImageView(
+                            base64String = imagesList[0],
+                            contentDescription = "Screen capture preview"
+                        )
+                    }
                 }
 
                 if (isUser) {

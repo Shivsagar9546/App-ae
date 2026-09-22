@@ -102,7 +102,13 @@ class GeminiApiClient {
                         else emptyList()
                     }
 
-                    val resolvedImages = messageImages.mapNotNull { imgData ->
+                    val resolvedImages = messageImages.flatMap { imgData ->
+                        if (imgData.contains("|")) {
+                            imgData.split("|")
+                        } else {
+                            listOf(imgData)
+                        }
+                    }.mapNotNull { imgData ->
                         if (imgData.isNotBlank() && (imgData.startsWith("/") || imgData.startsWith("file://"))) {
                             try {
                                 val path = imgData.replace("file://", "")

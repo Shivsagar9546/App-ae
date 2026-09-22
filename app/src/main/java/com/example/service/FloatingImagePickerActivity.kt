@@ -88,10 +88,30 @@ class FloatingImagePickerActivity : ComponentActivity() {
         safeFinish()
     }
 
+    private val requestMediaPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        onPermissionResultCallback?.invoke(isGranted)
+        safeFinish()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val mode = intent.getStringExtra(EXTRA_MODE) ?: MODE_GALLERY
         when (mode) {
+            MODE_MEDIA_PERMISSION -> {
+                val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    Manifest.permission.READ_MEDIA_IMAGES
+                } else {
+                    Manifest.permission.READ_EXTERNAL_STORAGE
+                }
+                if (ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED) {
+                    onPermissionResultCallback?.invoke(true)
+                    safeFinish()
+                } else {
+                    requestMediaPermissionLauncher.launch(permission)
+                }
+            }
             MODE_SCREEN_CAPTURE -> {
                 try {
                     val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
@@ -207,6 +227,12 @@ class FloatingImagePickerActivity : ComponentActivity() {
                 return
             }
 
+            projection.registerCallback(object : android.media.projection.MediaProjection.Callback() {
+                override fun onStop() {
+                    super.onStop()
+                }
+            }, android.os.Handler(android.os.Looper.getMainLooper()))
+
             val windowManager = getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
             val display = windowManager.defaultDisplay
             val metrics = android.util.DisplayMetrics()
@@ -260,12 +286,11 @@ class FloatingImagePickerActivity : ComponentActivity() {
                             bitmap
                         }
 
-                        virtualDisplay.release()
-                        projection.stop()
-                        imageReader.close()
+                        cleanupProjection(virtualDisplay, imageReader, projection)
                         fgs?.demoteFromMediaProjectionFgs()
 
                         onImageSelectedCallback?.invoke(cleanBitmap)
+                        safeFinish()
                     } else {
                         // Retry once
                         handler.postDelayed({
@@ -292,21 +317,18 @@ class FloatingImagePickerActivity : ComponentActivity() {
                                         bitmap
                                     }
 
-                                    virtualDisplay.release()
-                                    projection.stop()
-                                    imageReader.close()
+                                    cleanupProjection(virtualDisplay, imageReader, projection)
                                     fgs?.demoteFromMediaProjectionFgs()
 
                                     onImageSelectedCallback?.invoke(cleanBitmap)
                                 } else {
-                                    virtualDisplay.release()
-                                    projection.stop()
-                                    imageReader.close()
+                                    cleanupProjection(virtualDisplay, imageReader, projection)
                                     fgs?.demoteFromMediaProjectionFgs()
                                     fgs?.showBubble()
                                     Toast.makeText(this, "Screen capture timed out", Toast.LENGTH_SHORT).show()
                                 }
                             } catch (e: Exception) {
+                                cleanupProjection(virtualDisplay, imageReader, projection)
                                 fgs?.demoteFromMediaProjectionFgs()
                                 fgs?.showBubble()
                                 Toast.makeText(this, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -314,13 +336,12 @@ class FloatingImagePickerActivity : ComponentActivity() {
                                 safeFinish()
                             }
                         }, 50)
-                        return@postDelayed
                     }
                 } catch (e: Exception) {
+                    cleanupProjection(virtualDisplay, imageReader, projection)
                     fgs?.demoteFromMediaProjectionFgs()
                     fgs?.showBubble()
                     Toast.makeText(this, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                } finally {
                     safeFinish()
                 }
             }, 150)
@@ -332,12 +353,32 @@ class FloatingImagePickerActivity : ComponentActivity() {
         }
     }
 
+    private fun cleanupProjection(
+        virtualDisplay: android.hardware.display.VirtualDisplay?,
+        imageReader: android.media.ImageReader?,
+        projection: android.media.projection.MediaProjection?
+    ) {
+        try {
+            virtualDisplay?.release()
+        } catch (e: Exception) {}
+        try {
+            imageReader?.close()
+        } catch (e: Exception) {}
+        try {
+            projection?.stop()
+        } catch (e: Exception) {}
+    }
+
     private fun scaleDownBitmap(bitmap: Bitmap, maxDim: Int): Bitmap {
         return if (bitmap.width > maxDim || bitmap.height > maxDim) {
             val ratio = bitmap.width.toFloat() / bitmap.height.toFloat()
             val newW = if (bitmap.width > bitmap.height) maxDim else (maxDim * ratio).toInt()
             val newH = if (bitmap.width > bitmap.height) (maxDim / ratio).toInt() else maxDim
-            Bitmap.createScaledBitmap(bitmap, newW.coerceAtLeast(1), newH.coerceAtLeast(1), true)
+            val scaled = Bitmap.createScaledBitmap(bitmap, newW.coerceAtLeast(1), newH.coerceAtLeast(1), true)
+            if (scaled != bitmap) {
+                bitmap.recycle()
+            }
+            scaled
         } else {
             bitmap
         }
@@ -348,8 +389,19 @@ class FloatingImagePickerActivity : ComponentActivity() {
         const val MODE_GALLERY = "mode_gallery"
         const val MODE_CAMERA = "mode_camera"
         const val MODE_SCREEN_CAPTURE = "mode_screen_capture"
+        const val MODE_MEDIA_PERMISSION = "mode_media_permission"
 
         private var onImageSelectedCallback: ((Bitmap) -> Unit)? = null
+        private var onPermissionResultCallback: ((Boolean) -> Unit)? = null
+
+        fun launchPermissionRequest(context: Context, onResult: (Boolean) -> Unit) {
+            onPermissionResultCallback = onResult
+            val intent = Intent(context, FloatingImagePickerActivity::class.java).apply {
+                putExtra(EXTRA_MODE, MODE_MEDIA_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+            }
+            context.startActivity(intent)
+        }
 
         fun launchScreenCapture(context: Context, onPicked: (Bitmap) -> Unit) {
             onImageSelectedCallback = onPicked
