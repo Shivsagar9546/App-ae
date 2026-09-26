@@ -19,14 +19,23 @@ import java.util.Locale
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "admin_settings")
 
 data class AdminSettings(
-    val defaultProvider: String = "gemini", // "gemini" or "openai"
+    val defaultProvider: String = "gemini", // "gemini", "openai", "poe", or "openrouter"
     val geminiApiKey: String = "",
-    val geminiModel: String = "gemini-3.5-flash",
+    val geminiModel: String = "gemini-1.5-flash",
     val isGeminiEnabled: Boolean = true,
     val openAiApiKey: String = "",
     val openAiModel: String = "gpt-4o-mini",
     val isOpenAiEnabled: Boolean = true,
+    val poeApiKey: String = "",
+    val poeModel: String = "",
+    val isPoeEnabled: Boolean = true,
+    val poeModelsJson: String = "",
+    val openRouterApiKey: String = "",
+    val openRouterModel: String = "google/gemini-flash-1.5:free",
+    val isOpenRouterEnabled: Boolean = true,
+    val openRouterModelsJson: String = "",
     val isFallbackEnabled: Boolean = true,
+    val isWebSearchEnabled: Boolean = false,
     val systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
     val isScreenScanEnabled: Boolean = true,
     val isAreaScanEnabled: Boolean = true,
@@ -38,6 +47,8 @@ data class AdminSettings(
     val todayRequests: Int = 0,
     val geminiRequests: Int = 0,
     val openAiRequests: Int = 0,
+    val poeRequests: Int = 0,
+    val openRouterRequests: Int = 0,
     val screenScanRequests: Int = 0,
     val errorCount: Int = 0,
     val lastRequestDate: String = "",
@@ -89,7 +100,16 @@ class AdminPreferencesRepository(val context: Context) {
         val OPENAI_API_KEY = stringPreferencesKey("openai_api_key")
         val OPENAI_MODEL = stringPreferencesKey("openai_model")
         val OPENAI_ENABLED = booleanPreferencesKey("openai_enabled")
+        val POE_API_KEY = stringPreferencesKey("poe_api_key")
+        val POE_MODEL = stringPreferencesKey("poe_model")
+        val POE_ENABLED = booleanPreferencesKey("poe_enabled")
+        val POE_MODELS_JSON = stringPreferencesKey("poe_models_json")
+        val OPENROUTER_API_KEY = stringPreferencesKey("openrouter_api_key")
+        val OPENROUTER_MODEL = stringPreferencesKey("openrouter_model")
+        val OPENROUTER_ENABLED = booleanPreferencesKey("openrouter_enabled")
+        val OPENROUTER_MODELS_JSON = stringPreferencesKey("openrouter_models_json")
         val FALLBACK_ENABLED = booleanPreferencesKey("fallback_enabled")
+        val WEB_SEARCH_ENABLED = booleanPreferencesKey("web_search_enabled")
         val SYSTEM_PROMPT = stringPreferencesKey("system_prompt")
         val SCREEN_SCAN_ENABLED = booleanPreferencesKey("screen_scan_enabled")
         val AREA_SCAN_ENABLED = booleanPreferencesKey("area_scan_enabled")
@@ -110,6 +130,8 @@ class AdminPreferencesRepository(val context: Context) {
         val TODAY_REQUESTS = intPreferencesKey("today_requests")
         val GEMINI_REQUESTS = intPreferencesKey("gemini_requests")
         val OPENAI_REQUESTS = intPreferencesKey("openai_requests")
+        val POE_REQUESTS = intPreferencesKey("poe_requests")
+        val OPENROUTER_REQUESTS = intPreferencesKey("openrouter_requests")
         val SCREEN_SCAN_REQUESTS = intPreferencesKey("screen_scan_requests")
         val ERROR_COUNT = intPreferencesKey("error_count")
         val LAST_REQUEST_DATE = stringPreferencesKey("last_request_date")
@@ -127,12 +149,21 @@ class AdminPreferencesRepository(val context: Context) {
         AdminSettings(
             defaultProvider = preferences[PreferencesKeys.DEFAULT_PROVIDER] ?: "gemini",
             geminiApiKey = preferences[PreferencesKeys.GEMINI_API_KEY] ?: "",
-            geminiModel = preferences[PreferencesKeys.GEMINI_MODEL] ?: "gemini-3.5-flash",
+            geminiModel = preferences[PreferencesKeys.GEMINI_MODEL] ?: "gemini-1.5-flash",
             isGeminiEnabled = preferences[PreferencesKeys.GEMINI_ENABLED] ?: true,
             openAiApiKey = preferences[PreferencesKeys.OPENAI_API_KEY] ?: "",
             openAiModel = preferences[PreferencesKeys.OPENAI_MODEL] ?: "gpt-4o-mini",
             isOpenAiEnabled = preferences[PreferencesKeys.OPENAI_ENABLED] ?: true,
+            poeApiKey = preferences[PreferencesKeys.POE_API_KEY] ?: "",
+            poeModel = preferences[PreferencesKeys.POE_MODEL] ?: "",
+            isPoeEnabled = preferences[PreferencesKeys.POE_ENABLED] ?: true,
+            poeModelsJson = preferences[PreferencesKeys.POE_MODELS_JSON] ?: "",
+            openRouterApiKey = preferences[PreferencesKeys.OPENROUTER_API_KEY] ?: "",
+            openRouterModel = preferences[PreferencesKeys.OPENROUTER_MODEL] ?: "google/gemini-flash-1.5:free",
+            isOpenRouterEnabled = preferences[PreferencesKeys.OPENROUTER_ENABLED] ?: true,
+            openRouterModelsJson = preferences[PreferencesKeys.OPENROUTER_MODELS_JSON] ?: "",
             isFallbackEnabled = preferences[PreferencesKeys.FALLBACK_ENABLED] ?: true,
+            isWebSearchEnabled = preferences[PreferencesKeys.WEB_SEARCH_ENABLED] ?: false,
             systemPrompt = preferences[PreferencesKeys.SYSTEM_PROMPT]?.let {
                 if (!it.contains("EASY TO UNDERSTAND RULE")) DEFAULT_SYSTEM_PROMPT else it
             } ?: DEFAULT_SYSTEM_PROMPT,
@@ -153,6 +184,8 @@ class AdminPreferencesRepository(val context: Context) {
             todayRequests = todayCount,
             geminiRequests = preferences[PreferencesKeys.GEMINI_REQUESTS] ?: 0,
             openAiRequests = preferences[PreferencesKeys.OPENAI_REQUESTS] ?: 0,
+            poeRequests = preferences[PreferencesKeys.POE_REQUESTS] ?: 0,
+            openRouterRequests = preferences[PreferencesKeys.OPENROUTER_REQUESTS] ?: 0,
             screenScanRequests = preferences[PreferencesKeys.SCREEN_SCAN_REQUESTS] ?: 0,
             errorCount = preferences[PreferencesKeys.ERROR_COUNT] ?: 0,
             lastRequestDate = storedDate
@@ -169,7 +202,16 @@ class AdminPreferencesRepository(val context: Context) {
         openAiApiKey: String? = null,
         openAiModel: String? = null,
         isOpenAiEnabled: Boolean? = null,
+        poeApiKey: String? = null,
+        poeModel: String? = null,
+        isPoeEnabled: Boolean? = null,
+        poeModelsJson: String? = null,
+        openRouterApiKey: String? = null,
+        openRouterModel: String? = null,
+        isOpenRouterEnabled: Boolean? = null,
+        openRouterModelsJson: String? = null,
         isFallbackEnabled: Boolean? = null,
+        isWebSearchEnabled: Boolean? = null,
         systemPrompt: String? = null,
         isScreenScanEnabled: Boolean? = null,
         isAreaScanEnabled: Boolean? = null,
@@ -193,7 +235,16 @@ class AdminPreferencesRepository(val context: Context) {
             openAiApiKey?.let { preferences[PreferencesKeys.OPENAI_API_KEY] = it }
             openAiModel?.let { preferences[PreferencesKeys.OPENAI_MODEL] = it }
             isOpenAiEnabled?.let { preferences[PreferencesKeys.OPENAI_ENABLED] = it }
+            poeApiKey?.let { preferences[PreferencesKeys.POE_API_KEY] = it }
+            poeModel?.let { preferences[PreferencesKeys.POE_MODEL] = it }
+            isPoeEnabled?.let { preferences[PreferencesKeys.POE_ENABLED] = it }
+            poeModelsJson?.let { preferences[PreferencesKeys.POE_MODELS_JSON] = it }
+            openRouterApiKey?.let { preferences[PreferencesKeys.OPENROUTER_API_KEY] = it }
+            openRouterModel?.let { preferences[PreferencesKeys.OPENROUTER_MODEL] = it }
+            isOpenRouterEnabled?.let { preferences[PreferencesKeys.OPENROUTER_ENABLED] = it }
+            openRouterModelsJson?.let { preferences[PreferencesKeys.OPENROUTER_MODELS_JSON] = it }
             isFallbackEnabled?.let { preferences[PreferencesKeys.FALLBACK_ENABLED] = it }
+            isWebSearchEnabled?.let { preferences[PreferencesKeys.WEB_SEARCH_ENABLED] = it }
             systemPrompt?.let { preferences[PreferencesKeys.SYSTEM_PROMPT] = it }
             isScreenScanEnabled?.let { preferences[PreferencesKeys.SCREEN_SCAN_ENABLED] = it }
             isAreaScanEnabled?.let { preferences[PreferencesKeys.AREA_SCAN_ENABLED] = it }
@@ -228,6 +279,10 @@ class AdminPreferencesRepository(val context: Context) {
                 preferences[PreferencesKeys.GEMINI_REQUESTS] = (preferences[PreferencesKeys.GEMINI_REQUESTS] ?: 0) + 1
             } else if (provider.equals("openai", ignoreCase = true)) {
                 preferences[PreferencesKeys.OPENAI_REQUESTS] = (preferences[PreferencesKeys.OPENAI_REQUESTS] ?: 0) + 1
+            } else if (provider.equals("poe", ignoreCase = true)) {
+                preferences[PreferencesKeys.POE_REQUESTS] = (preferences[PreferencesKeys.POE_REQUESTS] ?: 0) + 1
+            } else if (provider.equals("openrouter", ignoreCase = true)) {
+                preferences[PreferencesKeys.OPENROUTER_REQUESTS] = (preferences[PreferencesKeys.OPENROUTER_REQUESTS] ?: 0) + 1
             }
 
             if (isScreenScan) {
@@ -248,6 +303,8 @@ class AdminPreferencesRepository(val context: Context) {
             preferences[PreferencesKeys.TODAY_REQUESTS] = 0
             preferences[PreferencesKeys.GEMINI_REQUESTS] = 0
             preferences[PreferencesKeys.OPENAI_REQUESTS] = 0
+            preferences[PreferencesKeys.POE_REQUESTS] = 0
+            preferences[PreferencesKeys.OPENROUTER_REQUESTS] = 0
             preferences[PreferencesKeys.SCREEN_SCAN_REQUESTS] = 0
             preferences[PreferencesKeys.ERROR_COUNT] = 0
         }

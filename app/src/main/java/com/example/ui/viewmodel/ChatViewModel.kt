@@ -79,6 +79,31 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _testApiResult = MutableStateFlow<Pair<String, Boolean>?>(null)
     val testApiResult: StateFlow<Pair<String, Boolean>?> = _testApiResult.asStateFlow()
 
+    private val _poeModelsState = MutableStateFlow<List<String>>(emptyList())
+    val poeModelsState: StateFlow<List<String>> = _poeModelsState.asStateFlow()
+
+    private val _isRefreshingPoeModels = MutableStateFlow(false)
+    val isRefreshingPoeModels: StateFlow<Boolean> = _isRefreshingPoeModels.asStateFlow()
+
+    private val _openRouterModelsState = MutableStateFlow<List<String>>(emptyList())
+    val openRouterModelsState: StateFlow<List<String>> = _openRouterModelsState.asStateFlow()
+
+    private val _isRefreshingOpenRouterModels = MutableStateFlow(false)
+    val isRefreshingOpenRouterModels: StateFlow<Boolean> = _isRefreshingOpenRouterModels.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            adminPrefs.settingsFlow.collect { settings ->
+                if (settings.poeModelsJson.isNotBlank()) {
+                    _poeModelsState.value = settings.poeModelsJson.split(",").filter { it.isNotBlank() }
+                }
+                if (settings.openRouterModelsJson.isNotBlank()) {
+                    _openRouterModelsState.value = settings.openRouterModelsJson.split(",").filter { it.isNotBlank() }
+                }
+            }
+        }
+    }
+
     private var generationJob: Job? = null
 
     fun startNewChat() {
@@ -428,7 +453,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         openAiApiKey: String? = null,
         openAiModel: String? = null,
         isOpenAiEnabled: Boolean? = null,
+        poeApiKey: String? = null,
+        poeModel: String? = null,
+        isPoeEnabled: Boolean? = null,
+        poeModelsJson: String? = null,
+        openRouterApiKey: String? = null,
+        openRouterModel: String? = null,
+        isOpenRouterEnabled: Boolean? = null,
+        openRouterModelsJson: String? = null,
         isFallbackEnabled: Boolean? = null,
+        isWebSearchEnabled: Boolean? = null,
         systemPrompt: String? = null,
         isScreenScanEnabled: Boolean? = null,
         isAreaScanEnabled: Boolean? = null,
@@ -453,7 +487,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 openAiApiKey = openAiApiKey,
                 openAiModel = openAiModel,
                 isOpenAiEnabled = isOpenAiEnabled,
+                poeApiKey = poeApiKey,
+                poeModel = poeModel,
+                isPoeEnabled = isPoeEnabled,
+                poeModelsJson = poeModelsJson,
+                openRouterApiKey = openRouterApiKey,
+                openRouterModel = openRouterModel,
+                isOpenRouterEnabled = isOpenRouterEnabled,
+                openRouterModelsJson = openRouterModelsJson,
                 isFallbackEnabled = isFallbackEnabled,
+                isWebSearchEnabled = isWebSearchEnabled,
                 systemPrompt = systemPrompt,
                 isScreenScanEnabled = isScreenScanEnabled,
                 isAreaScanEnabled = isAreaScanEnabled,
@@ -528,6 +571,59 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _testApiResult.value = Pair("Testing OpenAI connection...", false)
             val result = aiRepository.testOpenAi(apiKey, model)
             _testApiResult.value = Pair(result.second, result.first)
+        }
+    }
+
+    fun testPoeConnection(apiKey: String, model: String) {
+        viewModelScope.launch {
+            _testApiResult.value = Pair("Testing Poe connection...", false)
+            val result = aiRepository.testPoe(apiKey, model)
+            _testApiResult.value = Pair(result.second, result.first)
+        }
+    }
+
+    fun refreshPoeModels(apiKey: String) {
+        if (apiKey.isBlank()) return
+        viewModelScope.launch {
+            _isRefreshingPoeModels.value = true
+            try {
+                val models = aiRepository.fetchPoeModels(apiKey)
+                if (models.isNotEmpty()) {
+                    _poeModelsState.value = models
+                    val modelsString = models.joinToString(",")
+                    adminPrefs.updateSettings(poeModelsJson = modelsString)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ChatViewModel", "Error refreshing models", e)
+            } finally {
+                _isRefreshingPoeModels.value = false
+            }
+        }
+    }
+
+    fun testOpenRouterConnection(apiKey: String, model: String) {
+        viewModelScope.launch {
+            _testApiResult.value = Pair("Testing OpenRouter connection...", false)
+            val result = aiRepository.testOpenRouter(apiKey, model)
+            _testApiResult.value = Pair(result.second, result.first)
+        }
+    }
+
+    fun refreshOpenRouterModels(apiKey: String) {
+        viewModelScope.launch {
+            _isRefreshingOpenRouterModels.value = true
+            try {
+                val models = aiRepository.fetchOpenRouterModels(apiKey)
+                if (models.isNotEmpty()) {
+                    _openRouterModelsState.value = models
+                    val modelsString = models.joinToString(",")
+                    adminPrefs.updateSettings(openRouterModelsJson = modelsString)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ChatViewModel", "Error refreshing OpenRouter models", e)
+            } finally {
+                _isRefreshingOpenRouterModels.value = false
+            }
         }
     }
 

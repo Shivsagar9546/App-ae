@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,7 +44,9 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -102,9 +105,15 @@ fun AdminPanelScreen(
     // Admin Config States
     var geminiKeyInput by remember(adminSettings.geminiApiKey) { mutableStateOf(adminSettings.geminiApiKey) }
     var openAiKeyInput by remember(adminSettings.openAiApiKey) { mutableStateOf(adminSettings.openAiApiKey) }
+    var poeKeyInput by remember(adminSettings.poeApiKey) { mutableStateOf(adminSettings.poeApiKey) }
+    var openRouterKeyInput by remember(adminSettings.openRouterApiKey) { mutableStateOf(adminSettings.openRouterApiKey) }
     var systemPromptInput by remember(adminSettings.systemPrompt) { mutableStateOf(adminSettings.systemPrompt) }
     var showGeminiKey by remember { mutableStateOf(false) }
     var showOpenAiKey by remember { mutableStateOf(false) }
+    var showPoeKey by remember { mutableStateOf(false) }
+    var showPoeModelsDropdown by remember { mutableStateOf(false) }
+    var showOpenRouterKey by remember { mutableStateOf(false) }
+    var showOpenRouterModelsDropdown by remember { mutableStateOf(false) }
     var showChangePinDialog by remember { mutableStateOf(false) }
     var newPinInput by remember { mutableStateOf("") }
 
@@ -297,7 +306,21 @@ fun AdminPanelScreen(
                 ) {
                     StatCard("Gemini Calls", "${adminSettings.geminiRequests}", Color(0xFF4F46E5), Modifier.weight(1f))
                     StatCard("OpenAI Calls", "${adminSettings.openAiRequests}", Color(0xFF10B981), Modifier.weight(1f))
-                    StatCard("Errors", "${adminSettings.errorCount}", MaterialTheme.colorScheme.error, Modifier.weight(1f))
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    StatCard("Poe Calls", "${adminSettings.poeRequests}", Color(0xFFEAB308), Modifier.weight(1f))
+                    StatCard("OpenRouter", "${adminSettings.openRouterRequests}", Color(0xFF06B6D4), Modifier.weight(1f))
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    StatCard("Errors Raised", "${adminSettings.errorCount}", MaterialTheme.colorScheme.error, Modifier.weight(1f))
                 }
 
                 Row(
@@ -331,6 +354,7 @@ fun AdminPanelScreen(
                         )
 
                         Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             FilterChip(
@@ -350,6 +374,28 @@ fun AdminPanelScreen(
                                 label = { Text("OpenAI") },
                                 leadingIcon = {
                                     if (adminSettings.defaultProvider == "openai") {
+                                        Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            )
+
+                            FilterChip(
+                                selected = adminSettings.defaultProvider == "poe",
+                                onClick = { viewModel.updateAdminSettings(defaultProvider = "poe") },
+                                label = { Text("Poe API") },
+                                leadingIcon = {
+                                    if (adminSettings.defaultProvider == "poe") {
+                                        Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            )
+
+                            FilterChip(
+                                selected = adminSettings.defaultProvider == "openrouter",
+                                onClick = { viewModel.updateAdminSettings(defaultProvider = "openrouter") },
+                                label = { Text("OpenRouter (Free/Premium)") },
+                                leadingIcon = {
+                                    if (adminSettings.defaultProvider == "openrouter") {
                                         Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
                                     }
                                 }
@@ -377,6 +423,34 @@ fun AdminPanelScreen(
                                 onCheckedChange = { viewModel.updateAdminSettings(isFallbackEnabled = it) }
                             )
                         }
+
+                        androidx.compose.material3.HorizontalDivider(
+                            modifier = Modifier.padding(vertical = 4.dp),
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Google Search Grounding (Web Search)",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                )
+                                Text(
+                                    text = "Enables Gemini to search the web in real-time to answer with current info and web links",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = adminSettings.isWebSearchEnabled,
+                                onCheckedChange = { viewModel.updateAdminSettings(isWebSearchEnabled = it) },
+                                modifier = Modifier.testTag("web_search_switch")
+                            )
+                        }
                     }
                 }
 
@@ -400,14 +474,14 @@ fun AdminPanelScreen(
                         ) {
                             Text(text = "Model:", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
                             FilterChip(
-                                selected = adminSettings.geminiModel == "gemini-3.5-flash",
-                                onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-3.5-flash") },
-                                label = { Text("gemini-3.5-flash (Fast)") }
+                                selected = adminSettings.geminiModel == "gemini-1.5-flash",
+                                onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-1.5-flash") },
+                                label = { Text("gemini-1.5-flash (Fast)") }
                             )
                             FilterChip(
-                                selected = adminSettings.geminiModel == "gemini-3.1-pro-preview",
-                                onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-3.1-pro-preview") },
-                                label = { Text("gemini-3.1-pro-preview") }
+                                selected = adminSettings.geminiModel == "gemini-1.5-pro",
+                                onClick = { viewModel.updateAdminSettings(geminiModel = "gemini-1.5-pro") },
+                                label = { Text("gemini-1.5-pro (Smart)") }
                             )
                         }
 
@@ -529,6 +603,282 @@ fun AdminPanelScreen(
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Text("Test Connection")
+                            }
+                        }
+                    }
+                }
+
+                // Section Poe: Poe Configuration
+                Text(
+                    text = "Poe Configuration",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(text = "Model:", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
+                            Box(modifier = Modifier.weight(1f)) {
+                                OutlinedButton(
+                                    onClick = { showPoeModelsDropdown = true },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text(
+                                        text = if (adminSettings.poeModel.isNotBlank()) adminSettings.poeModel else "Select Poe Model ▼",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = showPoeModelsDropdown,
+                                    onDismissRequest = { showPoeModelsDropdown = false }
+                                ) {
+                                    val modelsList by viewModel.poeModelsState.collectAsState()
+                                    if (modelsList.isEmpty()) {
+                                        DropdownMenuItem(
+                                            text = { Text("No models loaded. Click 'Refresh Models'.", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                            onClick = { showPoeModelsDropdown = false }
+                                        )
+                                    } else {
+                                        modelsList.forEach { modelName ->
+                                            DropdownMenuItem(
+                                                text = { Text(modelName) },
+                                                onClick = {
+                                                    viewModel.updateAdminSettings(poeModel = modelName)
+                                                    showPoeModelsDropdown = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = poeKeyInput,
+                            onValueChange = { poeKeyInput = it },
+                            label = { Text("Poe API Key (pb-...)") },
+                            placeholder = { Text("Enter your Poe API key") },
+                            visualTransformation = if (showPoeKey) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { showPoeKey = !showPoeKey }) {
+                                    Icon(
+                                        imageVector = if (showPoeKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = "Toggle key visibility"
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("poe_api_key_input"),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    viewModel.updateAdminSettings(poeApiKey = poeKeyInput.trim())
+                                    Toast.makeText(context, "Poe API key saved", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Save Key")
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    poeKeyInput = ""
+                                    viewModel.updateAdminSettings(poeApiKey = "", poeModel = "")
+                                    Toast.makeText(context, "Poe API key removed", Toast.LENGTH_SHORT).show()
+                                },
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Remove Key")
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.testPoeConnection(poeKeyInput.trim(), adminSettings.poeModel)
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Test Connection")
+                            }
+
+                            val isRefreshing by viewModel.isRefreshingPoeModels.collectAsState()
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.refreshPoeModels(poeKeyInput.trim())
+                                },
+                                enabled = !isRefreshing,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                if (isRefreshing) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Refreshing...")
+                                } else {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Refresh Models")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Section OpenRouter: OpenRouter Configuration
+                Text(
+                    text = "OpenRouter Configuration",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(text = "Model:", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
+                            Box(modifier = Modifier.weight(1f)) {
+                                OutlinedButton(
+                                    onClick = { showOpenRouterModelsDropdown = true },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text(
+                                        text = if (adminSettings.openRouterModel.isNotBlank()) adminSettings.openRouterModel else "Select OpenRouter Model ▼",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = showOpenRouterModelsDropdown,
+                                    onDismissRequest = { showOpenRouterModelsDropdown = false }
+                                ) {
+                                    val modelsList by viewModel.openRouterModelsState.collectAsState()
+                                    if (modelsList.isEmpty()) {
+                                        DropdownMenuItem(
+                                            text = { Text("No models loaded. Click 'Refresh Models'.", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                            onClick = { showOpenRouterModelsDropdown = false }
+                                        )
+                                    } else {
+                                        modelsList.forEach { modelName ->
+                                            DropdownMenuItem(
+                                                text = { Text(modelName) },
+                                                onClick = {
+                                                    viewModel.updateAdminSettings(openRouterModel = modelName)
+                                                    showOpenRouterModelsDropdown = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = openRouterKeyInput,
+                            onValueChange = { openRouterKeyInput = it },
+                            label = { Text("OpenRouter API Key (sk-or-...)") },
+                            placeholder = { Text("Enter your OpenRouter API key") },
+                            visualTransformation = if (showOpenRouterKey) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { showOpenRouterKey = !showOpenRouterKey }) {
+                                    Icon(
+                                        imageVector = if (showOpenRouterKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = "Toggle key visibility"
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("openrouter_api_key_input"),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    viewModel.updateAdminSettings(openRouterApiKey = openRouterKeyInput.trim())
+                                    Toast.makeText(context, "OpenRouter API key saved", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Save Key")
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    openRouterKeyInput = ""
+                                    viewModel.updateAdminSettings(openRouterApiKey = "", openRouterModel = "google/gemini-flash-1.5:free")
+                                    Toast.makeText(context, "OpenRouter API key removed", Toast.LENGTH_SHORT).show()
+                                },
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Remove Key")
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.testOpenRouterConnection(openRouterKeyInput.trim(), adminSettings.openRouterModel)
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Test Connection")
+                            }
+
+                            val isRefreshingOR by viewModel.isRefreshingOpenRouterModels.collectAsState()
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.refreshOpenRouterModels(openRouterKeyInput.trim())
+                                },
+                                enabled = !isRefreshingOR,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                if (isRefreshingOR) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Refreshing...")
+                                } else {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Refresh Models")
+                                }
                             }
                         }
                     }

@@ -219,6 +219,42 @@ fun SettingsScreen(
                 }
             }
 
+            // Real-time Web Search Setting
+            Text(
+                text = "Real-time AI Grounding",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onBackground
+            )
+
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Google Web Search",
+                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = "Let Gemini search Google in real-time to answer your questions with latest web data",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    androidx.compose.material3.Switch(
+                        checked = adminSettings.isWebSearchEnabled,
+                        onCheckedChange = { viewModel.updateAdminSettings(isWebSearchEnabled = it) },
+                        modifier = Modifier.testTag("settings_web_search_switch")
+                    )
+                }
+            }
+
             // Permissions & System Settings Shortcut
             Text(
                 text = "System Permissions",

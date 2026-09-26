@@ -28,7 +28,8 @@ class GeminiApiClient {
         systemPrompt: String,
         messages: List<AiMessage>,
         imageInlineBase64: String? = null,
-        imagesInlineBase64: List<String> = emptyList()
+        imagesInlineBase64: List<String> = emptyList(),
+        isWebSearchEnabled: Boolean = false
     ): AiResult = withContext(Dispatchers.IO) {
         val key = if (!apiKeyOverride.isNullOrBlank()) {
             apiKeyOverride
@@ -58,9 +59,8 @@ class GeminiApiClient {
         val modelsToTry = mutableListOf<String>().apply {
             add(requestedModel)
             if (requestedModel != "gemini-1.5-flash") add("gemini-1.5-flash")
-            if (requestedModel != "gemini-3.5-flash") add("gemini-3.5-flash")
-            if (requestedModel != "gemini-flash-latest") add("gemini-flash-latest")
-            if (requestedModel != "gemini-3.1-flash-lite-preview") add("gemini-3.1-flash-lite-preview")
+            if (requestedModel != "gemini-1.5-pro") add("gemini-1.5-pro")
+            if (requestedModel != "gemini-2.0-flash-exp") add("gemini-2.0-flash-exp")
         }.distinct()
 
         var lastErrorMsg = "Unable to reach Gemini servers."
@@ -161,6 +161,15 @@ class GeminiApiClient {
 
                 rootJson.put("generationConfig", genConfig)
 
+                // If web search is enabled, add googleSearchRetrieval tool for real-time grounding
+                if (isWebSearchEnabled) {
+                    val toolsArray = JSONArray()
+                    val googleSearchObj = JSONObject()
+                    googleSearchObj.put("googleSearchRetrieval", JSONObject())
+                    toolsArray.put(googleSearchObj)
+                    rootJson.put("tools", toolsArray)
+                }
+
                 val requestBody = rootJson.toString().toRequestBody(jsonMediaType)
                 val request = Request.Builder()
                     .url(url)
@@ -178,28 +187,21 @@ class GeminiApiClient {
                         "HTTP ${response.code}: $responseString"
                     }
                     lastErrorMsg = errorMsg
-                    isQuotaOrKey = response.code == 400 || response.code == 403
+                    
+                    val isKeyError = response.code == 401 || response.code == 403
+                    val isQuotaError = response.code == 429
+                    isQuotaOrKey = isKeyError || isQuotaError
 
-                    // If it's a high demand (503 / 429 / UNAVAILABLE / High Demand / Overloaded), attempt fallback model
-                    val isHighDemandOrOverload = response.code == 503 || 
-                            response.code == 429 || 
-                            response.code == 500 || 
-                            response.code == 502 || 
-                            response.code == 504 || 
-                            errorMsg.contains("high demand", ignoreCase = true) ||
-                            errorMsg.contains("overloaded", ignoreCase = true) ||
-                            errorMsg.contains("UNAVAILABLE", ignoreCase = true) ||
-                            errorMsg.contains("RESOURCE_EXHAUSTED", ignoreCase = true)
-
-                    if (isHighDemandOrOverload && targetModel != modelsToTry.last()) {
-                        Log.w("GeminiApiClient", "Model $targetModel is overloaded ($errorMsg). Trying next fallback model...")
+                    // Try next model if this is a model error (like 404/400) or high demand/overload
+                    if (!isKeyError && !isQuotaError && targetModel != modelsToTry.last()) {
+                        Log.w("GeminiApiClient", "Model $targetModel failed ($errorMsg). Trying next fallback model...")
                         kotlinx.coroutines.delay(200)
                         continue
                     }
 
                     return@withContext AiResult.Error(
                         errorMsg,
-                        isQuotaOrKeyError = isQuotaOrKey || response.code == 429
+                        isQuotaOrKeyError = isQuotaOrKey
                     )
                 }
 
@@ -216,8 +218,33 @@ class GeminiApiClient {
                             textBuilder.append(part.optString("text", ""))
                         }
                     }
-                    val text = textBuilder.toString()
+                    var text = textBuilder.toString()
                     if (text.isNotBlank()) {
+                        // Parse Grounding Metadata for real-time web search links
+                        val groundingMetadata = firstCandidate.optJSONObject("groundingMetadata")
+                        if (groundingMetadata != null) {
+                            val groundingChunks = groundingMetadata.optJSONArray("groundingChunks")
+                            if (groundingChunks != null && groundingChunks.length() > 0) {
+                                val sourcesList = mutableListOf<String>()
+                                for (j in 0 until groundingChunks.length()) {
+                                    val chunk = groundingChunks.getJSONObject(j)
+                                    val web = chunk.optJSONObject("web")
+                                    if (web != null) {
+                                        val title = web.optString("title", "")
+                                        val uri = web.optString("uri", "")
+                                        if (uri.isNotBlank()) {
+                                            val displayTitle = if (title.isNotBlank()) title else uri
+                                            sourcesList.add("- [$displayTitle]($uri)")
+                                        }
+                                    }
+                                }
+                                if (sourcesList.isNotEmpty()) {
+                                    val distinctSources = sourcesList.distinct().take(5)
+                                    text += "\n\n🌐 **Web Search Sources:**\n" + distinctSources.joinToString("\n")
+                                }
+                            }
+                        }
+
                         return@withContext AiResult.Success(
                             text = text,
                             providerUsed = "Gemini",

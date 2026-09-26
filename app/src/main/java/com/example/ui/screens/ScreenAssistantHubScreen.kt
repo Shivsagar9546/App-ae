@@ -255,18 +255,24 @@ fun ScreenAssistantHubScreen(
                                         Toast.makeText(context, "Please grant 'Display over other apps' permission first", Toast.LENGTH_LONG).show()
                                         requestOverlayPermission(context)
                                     } else {
-                                        val intent = Intent(context, FloatingAssistantService::class.java)
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                            context.startForegroundService(intent)
-                                        } else {
-                                            context.startService(intent)
+                                        try {
+                                            val intent = Intent(context, FloatingAssistantService::class.java)
+                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                                context.startForegroundService(intent)
+                                            } else {
+                                                context.startService(intent)
+                                            }
+                                            isServiceRunning = true
+                                            Toast.makeText(context, "Floating Assistant Bubble started! Check your screen.", Toast.LENGTH_SHORT).show()
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Failed to start service: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
                                         }
-                                        isServiceRunning = true
-                                        Toast.makeText(context, "Floating Assistant Bubble started! Check your screen.", Toast.LENGTH_SHORT).show()
                                     }
                                 } else {
-                                    val intent = Intent(context, FloatingAssistantService::class.java)
-                                    context.stopService(intent)
+                                    try {
+                                        val intent = Intent(context, FloatingAssistantService::class.java)
+                                        context.stopService(intent)
+                                    } catch (e: Exception) {}
                                     isServiceRunning = false
                                 }
                             },
@@ -786,14 +792,18 @@ fun ScreenAssistantHubScreen(
                     if (!Settings.canDrawOverlays(context)) {
                         requestOverlayPermission(context)
                     } else {
-                        val intent = Intent(context, FloatingAssistantService::class.java)
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            context.startForegroundService(intent)
-                        } else {
-                            context.startService(intent)
+                        try {
+                            val intent = Intent(context, FloatingAssistantService::class.java)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                context.startForegroundService(intent)
+                            } else {
+                                context.startService(intent)
+                            }
+                            isServiceRunning = true
+                            Toast.makeText(context, "Floating Assistant Bubble launched with custom style!", Toast.LENGTH_SHORT).show()
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Failed to start service: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
                         }
-                        isServiceRunning = true
-                        Toast.makeText(context, "Floating Assistant Bubble launched with custom style!", Toast.LENGTH_SHORT).show()
                     }
                 },
                 shape = RoundedCornerShape(16.dp),

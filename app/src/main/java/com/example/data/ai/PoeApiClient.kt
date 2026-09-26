@@ -1,0 +1,204 @@
+package com.example.data.ai
+
+import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.concurrent.TimeUnit
+
+class PoeApiClient {
+
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .build()
+
+    private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+
+    suspend fun generateContent(
+        apiKey: String,
+        model: String,
+        systemPrompt: String,
+        messages: List<AiMessage>,
+        imageInlineBase64: String? = null
+    ): AiResult = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            return@withContext AiResult.Error(
+                "Poe API key is not configured. Please add your key in the Admin Panel.",
+                isQuotaOrKeyError = true
+            )
+        }
+
+        val targetModel = if (model.isNotBlank()) model else "chinchilla"
+        val url = "https://api.poe.com/v1/chat/completions"
+
+        try {
+            val rootJson = JSONObject()
+            rootJson.put("model", targetModel)
+
+            val messagesArray = JSONArray()
+
+            // System prompt
+            if (systemPrompt.isNotBlank()) {
+                val sysObj = JSONObject()
+                sysObj.put("role", "system")
+                sysObj.put("content", systemPrompt)
+                messagesArray.put(sysObj)
+            }
+
+            // Chat messages
+            messages.forEachIndexed { index, msg ->
+                val msgObj = JSONObject()
+                val role = when (msg.role.lowercase()) {
+                    "user" -> "user"
+                    "system" -> "system"
+                    else -> "assistant"
+                }
+                msgObj.put("role", role)
+
+                val rawImgData = if (index == messages.lastIndex) (imageInlineBase64 ?: msg.imageBase64) else msg.imageBase64
+                val imgData = rawImgData?.let { pathOrBase64 ->
+                    if (pathOrBase64.isNotBlank() && (pathOrBase64.startsWith("/") || pathOrBase64.startsWith("file://"))) {
+                        try {
+                            val path = pathOrBase64.replace("file://", "")
+                            val file = java.io.File(path)
+                            if (file.exists()) {
+                                val bytes = file.readBytes()
+                                android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                            } else {
+                                null
+                            }
+                        } catch (e: Exception) {
+                            null
+                        }
+                    } else {
+                        pathOrBase64
+                    }
+                }
+
+                if (!imgData.isNullOrBlank()) {
+                    val contentArray = JSONArray()
+                    if (msg.text.isNotBlank()) {
+                        contentArray.put(JSONObject().put("type", "text").put("text", msg.text))
+                    }
+                    val imgObj = JSONObject()
+                    imgObj.put("type", "image_url")
+                    val urlObj = JSONObject()
+                    urlObj.put("url", "data:image/jpeg;base64,$imgData")
+                    imgObj.put("image_url", urlObj)
+                    contentArray.put(imgObj)
+                    msgObj.put("content", contentArray)
+                } else {
+                    msgObj.put("content", msg.text)
+                }
+
+                messagesArray.put(msgObj)
+            }
+
+            if (messagesArray.length() == 0) {
+                messagesArray.put(JSONObject().put("role", "user").put("content", "Hello"))
+            }
+
+            rootJson.put("messages", messagesArray)
+            rootJson.put("temperature", 0.2)
+
+            val requestBody = rootJson.toString().toRequestBody(jsonMediaType)
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $apiKey")
+                .post(requestBody)
+                .build()
+
+            val response = client.newCall(request).execute()
+            val responseString = response.body?.string() ?: ""
+
+            if (!response.isSuccessful) {
+                val errorMsg = try {
+                    val errJson = JSONObject(responseString)
+                    errJson.optJSONObject("error")?.optString("message") ?: "HTTP ${response.code}: $responseString"
+                } catch (e: Exception) {
+                    "HTTP ${response.code}: $responseString"
+                }
+                return@withContext AiResult.Error(
+                    errorMsg,
+                    isQuotaOrKeyError = response.code == 401 || response.code == 429
+                )
+            }
+
+            val respJson = JSONObject(responseString)
+            val choices = respJson.optJSONArray("choices")
+            if (choices != null && choices.length() > 0) {
+                val firstChoice = choices.getJSONObject(0)
+                val msg = firstChoice.optJSONObject("message")
+                val text = msg?.optString("content", "") ?: ""
+                if (text.isNotBlank()) {
+                    return@withContext AiResult.Success(
+                        text = text,
+                        providerUsed = "Poe",
+                        modelUsed = targetModel
+                    )
+                }
+            }
+
+            return@withContext AiResult.Error("No response content from Poe.")
+        } catch (e: Exception) {
+            Log.e("PoeApiClient", "Generation error", e)
+            return@withContext AiResult.Error("Network error connecting to Poe: ${e.localizedMessage ?: e.message}")
+        }
+    }
+
+    suspend fun testConnection(apiKey: String, model: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val testPrompt = listOf(AiMessage(role = "user", text = "Hi! Just say 'Poe connection successful'"))
+        val result = generateContent(
+            apiKey = apiKey,
+            model = model,
+            systemPrompt = "You are a test agent.",
+            messages = testPrompt
+        )
+        when (result) {
+            is AiResult.Success -> Pair(true, "Success: ${result.text.take(80)}")
+            is AiResult.Error -> Pair(false, result.message)
+        }
+    }
+
+    suspend fun fetchAvailableModels(apiKey: String): List<String> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) return@withContext emptyList<String>()
+        val url = "https://api.poe.com/v1/models"
+        try {
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $apiKey")
+                .get()
+                .build()
+
+            val response = client.newCall(request).execute()
+            val responseString = response.body?.string() ?: ""
+
+            if (response.isSuccessful) {
+                val json = JSONObject(responseString)
+                val data = json.optJSONArray("data")
+                if (data != null) {
+                    val list = mutableListOf<String>()
+                    for (i in 0 until data.length()) {
+                        val item = data.getJSONObject(i)
+                        val id = item.optString("id", "")
+                        if (id.isNotBlank()) {
+                            list.add(id)
+                        }
+                    }
+                    return@withContext list.sorted()
+                }
+            }
+            emptyList()
+        } catch (e: Exception) {
+            Log.e("PoeApiClient", "Error fetching models", e)
+            emptyList()
+        }
+    }
+}

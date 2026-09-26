@@ -13,7 +13,9 @@ import java.io.ByteArrayOutputStream
 class AiRepository(
     private val adminPreferencesRepository: AdminPreferencesRepository,
     private val geminiApiClient: GeminiApiClient = GeminiApiClient(),
-    private val openAiApiClient: OpenAiApiClient = OpenAiApiClient()
+    private val openAiApiClient: OpenAiApiClient = OpenAiApiClient(),
+    private val poeApiClient: PoeApiClient = PoeApiClient(),
+    private val openRouterApiClient: OpenRouterApiClient = OpenRouterApiClient()
 ) {
 
     suspend fun askAi(
@@ -99,6 +101,22 @@ class AiRepository(
                 messages = messages,
                 imageInlineBase64 = firstImageBase64
             )
+        } else if (primaryProvider == "poe") {
+            finalResult = poeApiClient.generateContent(
+                apiKey = settings.poeApiKey,
+                model = settings.poeModel,
+                systemPrompt = sysPrompt,
+                messages = messages,
+                imageInlineBase64 = firstImageBase64
+            )
+        } else if (primaryProvider == "openrouter") {
+            finalResult = openRouterApiClient.generateContent(
+                apiKey = settings.openRouterApiKey,
+                model = settings.openRouterModel,
+                systemPrompt = sysPrompt,
+                messages = messages,
+                imageInlineBase64 = firstImageBase64
+            )
         } else {
             // Try Gemini keys in sequence for automatic key rotation failover
             for (keyToTry in geminiKeys) {
@@ -108,7 +126,8 @@ class AiRepository(
                     systemPrompt = sysPrompt,
                     messages = messages,
                     imageInlineBase64 = firstImageBase64,
-                    imagesInlineBase64 = compressedImagesBase64
+                    imagesInlineBase64 = compressedImagesBase64,
+                    isWebSearchEnabled = settings.isWebSearchEnabled
                 )
                 if (geminiResult is AiResult.Success) {
                     finalResult = geminiResult
@@ -121,7 +140,7 @@ class AiRepository(
 
         // If primary failed and fallback is enabled, try the alternative
         if (finalResult !is AiResult.Success && settings.isFallbackEnabled) {
-            if (primaryProvider == "openai") {
+            if (primaryProvider == "openai" || primaryProvider == "poe" || primaryProvider == "openrouter") {
                 // Fallback to Gemini with key rotation
                 for (keyToTry in geminiKeys) {
                     val fallbackResult = geminiApiClient.generateContent(
@@ -130,7 +149,8 @@ class AiRepository(
                         systemPrompt = sysPrompt,
                         messages = messages,
                         imageInlineBase64 = firstImageBase64,
-                        imagesInlineBase64 = compressedImagesBase64
+                        imagesInlineBase64 = compressedImagesBase64,
+                        isWebSearchEnabled = settings.isWebSearchEnabled
                     )
                     if (fallbackResult is AiResult.Success) {
                         finalResult = fallbackResult
@@ -202,4 +222,12 @@ class AiRepository(
     suspend fun testGemini(apiKey: String, model: String) = geminiApiClient.testConnection(apiKey, model)
 
     suspend fun testOpenAi(apiKey: String, model: String) = openAiApiClient.testConnection(apiKey, model)
+
+    suspend fun testPoe(apiKey: String, model: String) = poeApiClient.testConnection(apiKey, model)
+
+    suspend fun fetchPoeModels(apiKey: String) = poeApiClient.fetchAvailableModels(apiKey)
+
+    suspend fun testOpenRouter(apiKey: String, model: String) = openRouterApiClient.testConnection(apiKey, model)
+
+    suspend fun fetchOpenRouterModels(apiKey: String) = openRouterApiClient.fetchAvailableModels(apiKey)
 }

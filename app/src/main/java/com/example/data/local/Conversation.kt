@@ -11,5 +11,5 @@ data class Conversation(
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
     val lastMessagePreview: String = "",
-    val modelUsed: String = "gemini-3.5-flash"
+    val modelUsed: String = "gemini-1.5-flash"
 )
